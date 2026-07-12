@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../models.dart';
 import '../player_service.dart';
 import '../theme.dart';
+import 'music_hub.dart';
 import 'widgets.dart';
 
 /// Long-press / ⋮ menu for any track, from any list. Actions apply across
@@ -69,6 +70,23 @@ void showTrackMenu(BuildContext context, Track t) {
                 showAddToPlaylistSheet(context, [t]);
               },
             ),
+            _MenuItem(
+              icon: Icons.person_outline,
+              label: 'Go to artist',
+              onTap: () {
+                Navigator.pop(sheetCtx);
+                openArtist(context, s, t);
+              },
+            ),
+            if (t.album != null && t.album!.trim().isNotEmpty)
+              _MenuItem(
+                icon: Icons.album_outlined,
+                label: 'Go to album',
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  openAlbum(context, s, t);
+                },
+              ),
             if (canDownload)
               _MenuItem(
                 icon: Icons.download_outlined,

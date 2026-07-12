@@ -12,6 +12,7 @@ import '../theme.dart';
 import '../waveform.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
+import 'music_hub.dart';
 import 'widgets.dart';
 
 /// The persistent player: a mini bar above the nav bar that the user drags up
@@ -420,17 +421,27 @@ class _FullPlayer extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(track.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.bold)),
+                    // Spotify-style: title opens the album, artist opens the
+                    // artist hub (YouTube → PC → on-phone, labeled sections).
+                    GestureDetector(
+                      onTap: () =>
+                          openAlbum(context, context.read<AppState>(), track),
+                      child: Text(track.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 22, fontWeight: FontWeight.bold)),
+                    ),
                     const SizedBox(height: 4),
-                    Text(track.artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 15, color: PA.textSecondary)),
+                    GestureDetector(
+                      onTap: () =>
+                          openArtist(context, context.read<AppState>(), track),
+                      child: Text(track.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 15, color: PA.textSecondary)),
+                    ),
                   ],
                 ),
               ),

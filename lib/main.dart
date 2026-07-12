@@ -10,14 +10,21 @@ import 'src/theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.shaharyar.papaudio.audio',
-    androidNotificationChannelName: 'Papa Audio',
-    androidNotificationOngoing: true,
-  );
+  // Never block first paint on init/network — that caused a white screen on
+  // launch whenever a (now unreachable) bridge URL was already saved.
+  try {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'com.shaharyar.papaudio.audio',
+      androidNotificationChannelName: 'Papa Audio',
+      androidNotificationOngoing: true,
+    );
+  } catch (_) {
+    // Background audio unavailable (e.g. emulator) — still start the app.
+  }
   final state = AppState();
-  await state.restore();
   runApp(ChangeNotifierProvider.value(value: state, child: const PapaApp()));
+  // Restore the saved bridge + load the library AFTER the UI is up.
+  state.restore();
 }
 
 class PapaApp extends StatelessWidget {

@@ -875,7 +875,8 @@ class _FoldersViewState extends State<_FoldersView> {
 // ── Shared pieces ─────────────────────────────────────────────────────────────
 
 /// Generic "list of tracks" screen used by artists, folders, history days…
-class TrackListScreen extends StatelessWidget {
+/// The app-bar search icon reveals an inline filter over this list only.
+class TrackListScreen extends StatefulWidget {
   final String title;
   final List<Track> tracks;
   final String? collectionId; // enables per-collection resume
@@ -883,12 +884,45 @@ class TrackListScreen extends StatelessWidget {
       {super.key, required this.title, required this.tracks, this.collectionId});
 
   @override
+  State<TrackListScreen> createState() => _TrackListScreenState();
+}
+
+class _TrackListScreenState extends State<TrackListScreen> {
+  bool _searching = false;
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
+    final tracks = _query.isEmpty
+        ? widget.tracks
+        : [
+            for (final t in widget.tracks)
+              if (blobMatches(
+                  normText('${t.title} ${t.artist} ${t.album ?? ''}'), _query))
+                t
+          ];
     return Scaffold(
       appBar: AppBar(
         backgroundColor: PA.background,
-        title: Text(title, style: const TextStyle(fontSize: 17)),
+        title: _searching
+            ? TextField(
+                autofocus: true,
+                style: const TextStyle(fontSize: 15),
+                decoration: const InputDecoration(
+                    hintText: 'Filter this list…', border: InputBorder.none),
+                onChanged: (v) => setState(() => _query = normText(v)),
+              )
+            : Text(widget.title, style: const TextStyle(fontSize: 17)),
+        actions: [
+          IconButton(
+            icon: Icon(_searching ? Icons.close : Icons.search, size: 20),
+            onPressed: () => setState(() {
+              _searching = !_searching;
+              if (!_searching) _query = '';
+            }),
+          ),
+        ],
       ),
       bottomNavigationBar: const SelectionBar(),
       body: Column(
@@ -896,7 +930,8 @@ class TrackListScreen extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: PlayShuffleRow(tracks: tracks, collectionId: collectionId),
+            child: PlayShuffleRow(
+                tracks: tracks, collectionId: widget.collectionId),
           ),
           Expanded(
             child: ListView.builder(
@@ -905,7 +940,7 @@ class TrackListScreen extends StatelessWidget {
               itemBuilder: (_, i) => TrackTile(
                   track: tracks[i],
                   onTap: () => s.playTrackInList(tracks, i,
-                      collectionId: collectionId)),
+                      collectionId: widget.collectionId)),
             ),
           ),
         ],

@@ -1,24 +1,26 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 
+import 'db.dart';
 import 'models.dart';
 
-/// Listen history + play counts. A "listen" is recorded once a track has
-/// actually been heard for a while (not merely skipped past) — the player
-/// service calls [onPositionTick] and this decides when it counts.
+/// Listen history + play counts, backed by SQLite. A "listen" is recorded once
+/// a track has actually been heard for a while (not merely skipped past) — the
+/// player service calls [onPositionTick] and this decides when it counts.
+///
+/// Recent entries stay in memory for instant day-grouping in the UI; every
+/// mutation is a single incremental DB write (never a full rewrite).
 class HistoryService extends ChangeNotifier {
-  static const _maxEntries = 20000;
+  static const _memoryCap = 20000;
 
   /// Seconds of actual playback after which a play counts as a listen.
   /// Overridable from settings via [listenSecondsProvider].
   static const listenAfterSeconds = 20.0;
   int Function()? listenSecondsProvider;
 
-  final List<HistoryEntry> entries = []; // newest first
-  final Map<String, int> counts = {}; // track key → listens
+  final List<HistoryEntry> entries = []; // newest first (recent window)
+  final Map<String, int> counts = {}; // track key → listens (all time)
   final Map<String, int> firstListen = {}; // track key → epoch ms of first listen
   final Map<String, Track> _byKey = {}; // latest Track snapshot per key
 
@@ -26,30 +28,42 @@ class HistoryService extends ChangeNotifier {
   /// (day groups, rankings) instead of recomputing on every rebuild.
   int revision = 0;
 
-  File? _file;
-  bool _dirty = false;
+  AppDatabase? _db;
 
-  Future<void> init() async {
-    final docs = await getApplicationDocumentsDirectory();
-    _file = File('${docs.path}${Platform.pathSeparator}history.json');
+  Future<void> init(AppDatabase db) async {
+    _db = db;
     try {
-      if (await _file!.exists()) {
-        // History can hold thousands of entries — decode off the UI thread so
-        // startup never drops frames.
-        final list =
-            await compute(_decodeList, await _file!.readAsString());
-        for (final e in list) {
-          final entry = HistoryEntry.fromJson(e as Map<String, dynamic>);
-          entries.add(entry);
-          counts.update(entry.track.key, (n) => n + 1, ifAbsent: () => 1);
-          _byKey.putIfAbsent(entry.track.key, () => entry.track);
-          // Entries are newest-first, so the last write per key is the oldest.
-          firstListen[entry.track.key] = entry.at;
-        }
+      // Recent window for the UI.
+      final rows = await db.db.query('history',
+          orderBy: 'id DESC', limit: _memoryCap);
+      for (final r in rows) {
+        entries.add(HistoryEntry(
+          dbId: r['id'] as int,
+          track: Track.fromJson(
+              jsonDecode(r['track_json'] as String) as Map<String, dynamic>),
+          at: r['at'] as int,
+        ));
+      }
+      // All-time aggregates straight from SQL — correct even past the cap.
+      final agg = await db.db.rawQuery(
+          'SELECT track_key, COUNT(*) c, MIN(at) first_at FROM history GROUP BY track_key');
+      for (final r in agg) {
+        counts[r['track_key'] as String] = r['c'] as int;
+        firstListen[r['track_key'] as String] = r['first_at'] as int;
+      }
+      // Latest snapshot per key, for ranking rows not in the recent window.
+      final snaps = await db.db.rawQuery(
+          'SELECT h.track_key, h.track_json FROM history h '
+          'INNER JOIN (SELECT track_key k, MAX(id) m FROM history GROUP BY track_key) x '
+          'ON h.id = x.m');
+      for (final r in snaps) {
+        _byKey[r['track_key'] as String] = Track.fromJson(
+            jsonDecode(r['track_json'] as String) as Map<String, dynamic>);
       }
     } catch (_) {
       entries.clear();
       counts.clear();
+      firstListen.clear();
     }
     revision++;
     notifyListeners();
@@ -80,27 +94,38 @@ class HistoryService extends ChangeNotifier {
     }
   }
 
-  void _record(Track t) {
+  Future<void> _record(Track t) async {
     final now = DateTime.now().millisecondsSinceEpoch;
-    entries.insert(0, HistoryEntry(track: t, at: now));
-    if (entries.length > _maxEntries) entries.removeRange(_maxEntries, entries.length);
     counts.update(t.key, (n) => n + 1, ifAbsent: () => 1);
     firstListen.putIfAbsent(t.key, () => now);
     _byKey[t.key] = t;
-    _dirty = true;
+    int? dbId;
+    try {
+      dbId = await _db?.db.insert('history', {
+        'at': now,
+        'track_key': t.key,
+        'track_json': jsonEncode(t.toJson()),
+      });
+    } catch (_) {}
+    entries.insert(0, HistoryEntry(dbId: dbId, track: t, at: now));
+    if (entries.length > _memoryCap) {
+      entries.removeRange(_memoryCap, entries.length);
+    }
     revision++;
     notifyListeners();
-    _saveSoon();
   }
 
   Future<void> removeEntry(HistoryEntry e) async {
     entries.remove(e);
     final left = counts.update(e.track.key, (n) => n - 1, ifAbsent: () => 0);
     if (left <= 0) counts.remove(e.track.key);
-    _dirty = true;
+    if (e.dbId != null) {
+      try {
+        await _db?.db.delete('history', where: 'id = ?', whereArgs: [e.dbId]);
+      } catch (_) {}
+    }
     revision++;
     notifyListeners();
-    _saveSoon();
   }
 
   Future<void> clear() async {
@@ -108,10 +133,11 @@ class HistoryService extends ChangeNotifier {
     counts.clear();
     firstListen.clear();
     _byKey.clear();
-    _dirty = true;
+    try {
+      await _db?.db.delete('history');
+    } catch (_) {}
     revision++;
     notifyListeners();
-    _saveSoon();
   }
 
   // ── Views ───────────────────────────────────────────────────────────────────
@@ -152,46 +178,14 @@ class HistoryService extends ChangeNotifier {
     return out;
   }
 
-  // ── Persistence (debounced — listens arrive mid-playback) ──────────────────
-
-  bool _saving = false;
-  Future<void> _saveSoon() async {
-    if (_saving) return;
-    _saving = true;
-    await Future.delayed(const Duration(seconds: 2));
-    _saving = false;
-    if (!_dirty) return;
-    _dirty = false;
-    final f = _file;
-    if (f == null) return;
-    try {
-      await f.writeAsString(jsonEncode(entries.map((e) => e.toJson()).toList()));
-    } catch (_) {}
-  }
-
-  /// Flush on app pause so listens aren't lost.
-  Future<void> flush() async {
-    final f = _file;
-    if (f == null || !_dirty) return;
-    _dirty = false;
-    try {
-      await f.writeAsString(jsonEncode(entries.map((e) => e.toJson()).toList()));
-    } catch (_) {}
-  }
+  /// Writes are incremental now; kept for the app-lifecycle hook's benefit.
+  Future<void> flush() async {}
 }
 
-List<dynamic> _decodeList(String raw) => jsonDecode(raw) as List;
-
 class HistoryEntry {
+  final int? dbId;
   final Track track;
   final int at; // epoch ms
 
-  const HistoryEntry({required this.track, required this.at});
-
-  factory HistoryEntry.fromJson(Map<String, dynamic> j) => HistoryEntry(
-        track: Track.fromJson((j['track'] ?? {}) as Map<String, dynamic>),
-        at: (j['at'] as num?)?.toInt() ?? 0,
-      );
-
-  Map<String, dynamic> toJson() => {'track': track.toJson(), 'at': at};
+  const HistoryEntry({this.dbId, required this.track, required this.at});
 }

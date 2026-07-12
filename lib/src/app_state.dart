@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bridge.dart';
+import 'db.dart';
 import 'downloads.dart';
 import 'history.dart';
 import 'local_library.dart';
@@ -59,19 +60,20 @@ class AppState extends ChangeNotifier {
     // Local features first — they work with no bridge at all.
     playerService.history = history;
     _lifecycle ??= AppLifecycleListener(onInactive: () => history.flush());
+    final db = await AppDatabase.open();
     await Future.wait([
       downloads.init(),
-      playlists.init(),
-      history.init(),
+      playlists.init(db),
+      history.init(db),
       settings.init(),
-      queues.init(),
+      queues.init(db),
     ]);
     await playerService.applySettings(settings);
     history.listenSecondsProvider = () => settings.listenSeconds;
     playerService.onNewQueue = queues.record;
     await localLibrary.init();
     // Bring back last session's queue (paused) once sources are known.
-    await playerService.initPersistence();
+    await playerService.initPersistence(db);
     final prefs = await SharedPreferences.getInstance();
     localOnly = prefs.getBool('localOnly') ?? false;
     final saved = prefs.getString('bridgeUrl');

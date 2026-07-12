@@ -1,42 +1,57 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 
+import 'db.dart';
 import 'models.dart';
 
-/// User playlists + favorites, persisted as JSON in the app documents dir.
-/// Tracks are stored as full Track json so playlists survive even when a
-/// source (bridge/local library) is unavailable at load time.
+/// User playlists + favorites, backed by SQLite. Every mutation is a targeted
+/// statement or a per-playlist transaction — no whole-store rewrites.
 class PlaylistsService extends ChangeNotifier {
   List<Playlist> playlists = [];
   final Set<String> _favoriteKeys = {};
   List<Track> _favoriteTracks = [];
 
-  File? _file;
+  AppDatabase? _db;
 
   List<Track> get favorites => _favoriteTracks;
   bool isFavorite(Track t) => _favoriteKeys.contains(t.key);
 
-  Future<void> init() async {
-    final docs = await getApplicationDocumentsDirectory();
-    _file = File('${docs.path}${Platform.pathSeparator}playlists.json');
+  Future<void> init(AppDatabase db) async {
+    _db = db;
     try {
-      if (await _file!.exists()) {
-        final j = jsonDecode(await _file!.readAsString()) as Map<String, dynamic>;
-        playlists = ((j['playlists'] ?? []) as List)
-            .map((p) => Playlist.fromJson(p as Map<String, dynamic>))
-            .toList();
-        _favoriteTracks = ((j['favorites'] ?? []) as List)
-            .map((t) => Track.fromJson(t as Map<String, dynamic>))
-            .toList();
-        _favoriteKeys
-          ..clear()
-          ..addAll(_favoriteTracks.map((t) => t.key));
+      final favRows =
+          await db.db.query('favorites', orderBy: 'added_at ASC');
+      _favoriteTracks = [
+        for (final r in favRows)
+          Track.fromJson(
+              jsonDecode(r['track_json'] as String) as Map<String, dynamic>)
+      ];
+      _favoriteKeys
+        ..clear()
+        ..addAll(_favoriteTracks.map((t) => t.key));
+
+      final plRows = await db.db.query('playlists', orderBy: 'created_at ASC');
+      final trackRows = await db.db.query('playlist_tracks', orderBy: 'pos ASC');
+      final byPlaylist = <String, List<Track>>{};
+      for (final r in trackRows) {
+        byPlaylist
+            .putIfAbsent(r['playlist_id'] as String, () => [])
+            .add(Track.fromJson(
+                jsonDecode(r['track_json'] as String) as Map<String, dynamic>));
       }
+      playlists = [
+        for (final r in plRows)
+          Playlist(
+            id: r['id'] as String,
+            name: r['name'] as String,
+            tracks: byPlaylist[r['id'] as String] ?? [],
+            createdAt: r['created_at'] as int,
+            modifiedAt: r['modified_at'] as int,
+          )
+      ];
     } catch (_) {
-      // Corrupt store — start fresh rather than crash the app.
       playlists = [];
       _favoriteTracks = [];
     }
@@ -47,11 +62,24 @@ class PlaylistsService extends ChangeNotifier {
     if (!_favoriteKeys.add(t.key)) {
       _favoriteKeys.remove(t.key);
       _favoriteTracks.removeWhere((x) => x.key == t.key);
+      try {
+        await _db?.db
+            .delete('favorites', where: 'track_key = ?', whereArgs: [t.key]);
+      } catch (_) {}
     } else {
       _favoriteTracks.add(t);
+      try {
+        await _db?.db.insert(
+            'favorites',
+            {
+              'track_key': t.key,
+              'added_at': DateTime.now().millisecondsSinceEpoch,
+              'track_json': jsonEncode(t.toJson()),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      } catch (_) {}
     }
     notifyListeners();
-    await _save();
   }
 
   Future<Playlist> create(String name) async {
@@ -63,29 +91,65 @@ class PlaylistsService extends ChangeNotifier {
     );
     playlists.add(p);
     notifyListeners();
-    await _save();
+    try {
+      await _db?.db.insert('playlists', {
+        'id': p.id,
+        'name': p.name,
+        'created_at': p.createdAt,
+        'modified_at': p.modifiedAt,
+      });
+    } catch (_) {}
     return p;
   }
 
   Future<void> rename(Playlist p, String name) async {
     if (name.trim().isEmpty) return;
     p.name = name.trim();
+    p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
     notifyListeners();
-    await _save();
+    try {
+      await _db?.db.update(
+          'playlists', {'name': p.name, 'modified_at': p.modifiedAt},
+          where: 'id = ?', whereArgs: [p.id]);
+    } catch (_) {}
   }
 
   Future<void> delete(Playlist p) async {
     playlists.removeWhere((x) => x.id == p.id);
     notifyListeners();
-    await _save();
+    try {
+      await _db?.db.transaction((txn) async {
+        await txn.delete('playlists', where: 'id = ?', whereArgs: [p.id]);
+        await txn.delete('playlist_tracks',
+            where: 'playlist_id = ?', whereArgs: [p.id]);
+      });
+    } catch (_) {}
   }
 
   /// Appends; duplicates are allowed (playlists are ordered lists, not sets).
   Future<void> addTracks(Playlist p, List<Track> tracks) async {
+    final start = p.tracks.length;
     p.tracks.addAll(tracks);
     p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
     notifyListeners();
-    await _save();
+    try {
+      final batch = _db?.db.batch();
+      if (batch != null) {
+        for (var i = 0; i < tracks.length; i++) {
+          batch.insert(
+              'playlist_tracks',
+              {
+                'playlist_id': p.id,
+                'pos': start + i,
+                'track_json': jsonEncode(tracks[i].toJson()),
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+        batch.update('playlists', {'modified_at': p.modifiedAt},
+            where: 'id = ?', whereArgs: [p.id]);
+        await batch.commit(noResult: true);
+      }
+    } catch (_) {}
   }
 
   Future<void> removeAt(Playlist p, int index) async {
@@ -93,7 +157,7 @@ class PlaylistsService extends ChangeNotifier {
     p.tracks.removeAt(index);
     p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
     notifyListeners();
-    await _save();
+    await _rewriteTracks(p);
   }
 
   Future<void> reorder(Playlist p, int from, int to) async {
@@ -102,16 +166,28 @@ class PlaylistsService extends ChangeNotifier {
     p.tracks.insert(to.clamp(0, p.tracks.length), t);
     p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
     notifyListeners();
-    await _save();
+    await _rewriteTracks(p);
   }
 
-  Future<void> _save() async {
-    final f = _file;
-    if (f == null) return;
-    await f.writeAsString(jsonEncode({
-      'playlists': playlists.map((p) => p.toJson()).toList(),
-      'favorites': _favoriteTracks.map((t) => t.toJson()).toList(),
-    }));
+  /// Positions changed — rewrite THIS playlist's rows in one transaction.
+  Future<void> _rewriteTracks(Playlist p) async {
+    try {
+      await _db?.db.transaction((txn) async {
+        await txn.delete('playlist_tracks',
+            where: 'playlist_id = ?', whereArgs: [p.id]);
+        final batch = txn.batch();
+        for (var i = 0; i < p.tracks.length; i++) {
+          batch.insert('playlist_tracks', {
+            'playlist_id': p.id,
+            'pos': i,
+            'track_json': jsonEncode(p.tracks[i].toJson()),
+          });
+        }
+        batch.update('playlists', {'modified_at': p.modifiedAt},
+            where: 'id = ?', whereArgs: [p.id]);
+        await batch.commit(noResult: true);
+      });
+    } catch (_) {}
   }
 }
 
@@ -131,22 +207,4 @@ class Playlist {
   }) : modifiedAt = modifiedAt ?? createdAt;
 
   double get totalDuration => tracks.fold(0, (s, t) => s + t.duration);
-
-  factory Playlist.fromJson(Map<String, dynamic> j) => Playlist(
-        id: (j['id'] ?? '').toString(),
-        name: (j['name'] ?? 'Playlist').toString(),
-        tracks: ((j['tracks'] ?? []) as List)
-            .map((t) => Track.fromJson(t as Map<String, dynamic>))
-            .toList(),
-        createdAt: (j['createdAt'] as num?)?.toInt() ?? 0,
-        modifiedAt: (j['modifiedAt'] as num?)?.toInt(),
-      );
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'tracks': tracks.map((t) => t.toJson()).toList(),
-        'createdAt': createdAt,
-        'modifiedAt': modifiedAt,
-      };
 }

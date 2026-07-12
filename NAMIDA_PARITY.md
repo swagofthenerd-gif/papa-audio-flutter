@@ -56,7 +56,8 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [ ] Track tile layout editor — configurable rows/fields (~30 fields), separator, sizes, inline heart (W3)
 - [ ] Moods / Tags / Rating tabs backed by per-track stats (W3)
 - [ ] Indexer config — folder include/exclude, min size/duration, extension blacklist, .nomedia, duplicate prevention (W4)
-- [ ] Artist & genre separators with never-split blacklist; feat.-artist extraction from titles (W4)
+- [x] Artist & genre separators with never-split blacklist — configurable in settings, credits every split artist
+- [ ] Feat.-artist extraction from track titles (W4)
 - [ ] Album identifiers — choose which tag fields distinguish identically named albums (W4)
 - [ ] FFmpeg tag-extraction fallback, lenient year parsing, post-load duration correction (W4)
 - [ ] Missing-tracks page + path healing — bulk old-to-new directory rewrite preserving stats/playlists/history (W4)
@@ -65,10 +66,11 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 
 ## Search
 
-- [x] Library search across title / artist / album / file path — live filter, per tab
-- [ ] Configurable search fields — toggle filename/composer/comment/year/moods/lyrics matching (W2)
-- [ ] Search cleanup — diacritic-, case- and symbol-insensitive matching (W2)
-- [ ] Debounced background search with loading state and media-type filter chips (W2)
+- [x] Multi-field search — title / artist / album / genre / filename via precomputed blobs, all-terms matching
+- [x] Search cleanup — diacritic- and case-insensitive matching ("beyonce" finds "Beyoncé")
+- [x] Debounced search built off the UI thread (blobs precomputed on a background isolate)
+- [ ] Configurable search fields — toggle composer/comment/year/moods/lyrics matching (W2)
+- [ ] Media-type filter chips in search results (W2)
 - [ ] Global search overlay — morphing app-bar field, sectioned results (album/artist rows above track list) (W2)
 - [ ] Smart-search rule filter — temporary rule-based filter over track results (W3)
 

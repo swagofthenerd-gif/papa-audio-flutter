@@ -1,30 +1,34 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 
+import 'db.dart';
 import 'models.dart';
 
-/// Auto-archive of played queues: every new queue is snapshotted with its
-/// timestamp so any listening session can be replayed later from the Queues
-/// tab. Capped — old snapshots roll off.
+/// Auto-archive of played queues, backed by SQLite: every new queue is
+/// snapshotted with its timestamp so any listening session can be replayed
+/// from the Queues tab. Capped — old snapshots roll off.
 class QueuesStore extends ChangeNotifier {
   static const _cap = 30;
 
   List<SavedQueue> saved = []; // newest first
-  File? _file;
+  AppDatabase? _db;
 
-  Future<void> init() async {
-    final docs = await getApplicationDocumentsDirectory();
-    _file = File('${docs.path}${Platform.pathSeparator}queues.json');
+  Future<void> init(AppDatabase db) async {
+    _db = db;
     try {
-      if (await _file!.exists()) {
-        final list = await compute(_decodeList, await _file!.readAsString());
-        saved = list
-            .map((e) => SavedQueue.fromJson(e as Map<String, dynamic>))
-            .toList();
-      }
+      final rows = await db.db.query('saved_queues', orderBy: 'at DESC');
+      saved = [
+        for (final r in rows)
+          SavedQueue(
+            at: r['at'] as int,
+            tracks: [
+              for (final t in jsonDecode(r['tracks_json'] as String) as List)
+                Track.fromJson(t as Map<String, dynamic>)
+            ],
+          )
+      ];
     } catch (_) {
       saved = [];
     }
@@ -35,56 +39,56 @@ class QueuesStore extends ChangeNotifier {
   /// of tracks refreshes the existing snapshot instead of duplicating it.
   void record(List<Track> tracks) {
     if (tracks.isEmpty) return;
-    final sig = tracks.map((t) => t.key).join('');
+    final sig = tracks.map((t) => t.key).join('');
     final now = DateTime.now().millisecondsSinceEpoch;
     final existing = saved.indexWhere((q) => q.sig == sig);
+    SavedQueue snapshot;
     if (existing >= 0) {
-      final q = saved.removeAt(existing);
-      saved.insert(0, SavedQueue(at: now, tracks: q.tracks));
+      snapshot = SavedQueue(at: now, tracks: saved.removeAt(existing).tracks);
     } else {
-      saved.insert(0, SavedQueue(at: now, tracks: List.of(tracks)));
-      if (saved.length > _cap) saved.removeRange(_cap, saved.length);
+      snapshot = SavedQueue(at: now, tracks: List.of(tracks));
     }
+    saved.insert(0, snapshot);
+    if (saved.length > _cap) saved.removeRange(_cap, saved.length);
     notifyListeners();
-    _save();
+    _persist(snapshot, sig);
+  }
+
+  Future<void> _persist(SavedQueue q, String sig) async {
+    try {
+      await _db?.db.transaction((txn) async {
+        await txn.delete('saved_queues', where: 'sig = ?', whereArgs: [sig]);
+        await txn.insert(
+            'saved_queues',
+            {
+              'at': q.at,
+              'sig': sig,
+              'tracks_json':
+                  jsonEncode(q.tracks.map((t) => t.toJson()).toList()),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.rawDelete(
+            'DELETE FROM saved_queues WHERE at NOT IN '
+            '(SELECT at FROM saved_queues ORDER BY at DESC LIMIT ?)',
+            [_cap]);
+      });
+    } catch (_) {}
   }
 
   Future<void> delete(SavedQueue q) async {
     saved.remove(q);
     notifyListeners();
-    await _save();
-  }
-
-  bool _saving = false;
-  Future<void> _save() async {
-    final f = _file;
-    if (f == null || _saving) return;
-    _saving = true;
-    await Future.delayed(const Duration(seconds: 1));
-    _saving = false;
     try {
-      await f.writeAsString(
-          jsonEncode(saved.map((q) => q.toJson()).toList()));
+      await _db?.db
+          .delete('saved_queues', where: 'at = ?', whereArgs: [q.at]);
     } catch (_) {}
   }
 }
 
-List<dynamic> _decodeList(String raw) => jsonDecode(raw) as List;
-
 class SavedQueue {
   final int at; // epoch ms
   final List<Track> tracks;
-  late final String sig = tracks.map((t) => t.key).join('');
+  late final String sig = tracks.map((t) => t.key).join('');
 
   SavedQueue({required this.at, required this.tracks});
-
-  factory SavedQueue.fromJson(Map<String, dynamic> j) => SavedQueue(
-        at: (j['at'] as num?)?.toInt() ?? 0,
-        tracks: ((j['tracks'] ?? []) as List)
-            .map((t) => Track.fromJson(t as Map<String, dynamic>))
-            .toList(),
-      );
-
-  Map<String, dynamic> toJson() =>
-      {'at': at, 'tracks': tracks.map((t) => t.toJson()).toList()};
 }

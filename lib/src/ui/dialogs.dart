@@ -169,9 +169,9 @@ void showAddToPlaylistSheet(BuildContext context, List<Track> tracks) {
   );
 }
 
-Future<String?> promptText(
-    BuildContext context, String title, String hint) async {
-  final ctrl = TextEditingController();
+Future<String?> promptText(BuildContext context, String title, String hint,
+    {String? initial}) async {
+  final ctrl = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
     builder: (dCtx) => AlertDialog(

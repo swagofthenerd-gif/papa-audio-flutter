@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../local_library.dart';
 import '../models.dart';
+import '../text_norm.dart';
 import '../theme.dart';
 import 'playlists_ui.dart';
 import 'selection_bar.dart';
@@ -45,19 +46,20 @@ class _LibraryTabState extends State<LibraryTab>
   }
 
   /// Search re-filters ~250ms after typing stops, so keystrokes never race
-  /// a full library re-sort.
+  /// a full library re-sort. The query is normalized (case + diacritics).
   void _onSearchChanged(String v) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 250), () {
-      if (mounted) setState(() => _query = v.trim().toLowerCase());
+      if (mounted) setState(() => _query = normText(v));
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final lib = context.read<AppState>().localLibrary;
+    final s = context.read<AppState>();
+    final lib = s.localLibrary;
     return AnimatedBuilder(
-      animation: lib,
+      animation: Listenable.merge([lib, s.settings]),
       builder: (context, _) {
         if (!lib.permitted) return _PermissionPrompt(lib: lib);
         return Column(
@@ -161,7 +163,7 @@ class _LibraryTabState extends State<LibraryTab>
   List<Track> _filteredTracks(LocalLibrary lib) {
     final all = lib.albums.expand((a) => a.tracks).toList();
     if (_query.isEmpty) return all;
-    return all.where((t) => _match(t, _query)).toList();
+    return all.where((t) => lib.matchesNorm(t, _query)).toList();
   }
 
   void _showSortMenu() {
@@ -221,11 +223,8 @@ class _LibraryTabState extends State<LibraryTab>
   }
 }
 
-bool _match(Track t, String q) =>
-    t.title.toLowerCase().contains(q) ||
-    t.artist.toLowerCase().contains(q) ||
-    (t.album ?? '').toLowerCase().contains(q) ||
-    t.filePath.toLowerCase().contains(q);
+// (Track matching now goes through LocalLibrary.matchesNorm — multi-field and
+// diacritic-insensitive via precomputed blobs.)
 
 // ── Tracks ────────────────────────────────────────────────────────────────────
 
@@ -279,7 +278,8 @@ class _TracksViewState extends State<_TracksView>
 
     var tracks = widget.lib.albums.expand((a) => a.tracks).toList();
     if (widget.query.isNotEmpty) {
-      tracks = tracks.where((t) => _match(t, widget.query)).toList();
+      tracks =
+          tracks.where((t) => widget.lib.matchesNorm(t, widget.query)).toList();
     }
     tracks.sort(_comparator(s));
     if (widget.reverse) tracks = tracks.reversed.toList();
@@ -468,9 +468,7 @@ class _AlbumsView extends StatelessWidget {
     var albums = lib.albums;
     if (query.isNotEmpty) {
       albums = albums
-          .where((a) =>
-              a.name.toLowerCase().contains(query) ||
-              a.artist.toLowerCase().contains(query))
+          .where((a) => blobMatches(normText('${a.name} ${a.artist}'), query))
           .toList();
     }
     if (albums.isEmpty) return const _Empty('No albums');
@@ -599,14 +597,19 @@ class _ArtistsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // "A; B feat. C" credits every artist — separators + never-split blacklist
+    // are configurable in settings.
+    final splitter = context.read<AppState>().settings.artistSplitter;
     final byArtist = <String, List<Track>>{};
     for (final t in lib.albums.expand((a) => a.tracks)) {
-      byArtist.putIfAbsent(t.artist, () => []).add(t);
+      for (final artist in splitter.split(t.artist)) {
+        byArtist.putIfAbsent(artist, () => []).add(t);
+      }
     }
     var names = byArtist.keys.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      ..sort((a, b) => normText(a).compareTo(normText(b)));
     if (query.isNotEmpty) {
-      names = names.where((n) => n.toLowerCase().contains(query)).toList();
+      names = names.where((n) => blobMatches(normText(n), query)).toList();
     }
     if (names.isEmpty) return const _Empty('No artists');
     return ListView.builder(
@@ -643,17 +646,19 @@ class _GenresView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final splitter = context.read<AppState>().settings.genreSplitter;
     final byGenre = <String, List<Track>>{};
     for (final t in lib.albums.expand((a) => a.tracks)) {
-      final g = (t.genre == null || t.genre!.trim().isEmpty)
-          ? 'Unknown genre'
-          : t.genre!.trim();
-      byGenre.putIfAbsent(g, () => []).add(t);
+      final raw = t.genre?.trim() ?? '';
+      final genres = raw.isEmpty ? const ['Unknown genre'] : splitter.split(raw);
+      for (final g in genres) {
+        byGenre.putIfAbsent(g, () => []).add(t);
+      }
     }
     var names = byGenre.keys.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      ..sort((a, b) => normText(a).compareTo(normText(b)));
     if (query.isNotEmpty) {
-      names = names.where((n) => n.toLowerCase().contains(query)).toList();
+      names = names.where((n) => blobMatches(normText(n), query)).toList();
     }
     if (names.isEmpty) {
       return const _Empty(
@@ -707,7 +712,7 @@ class _FoldersView extends StatelessWidget {
     }
     var dirs = byFolder.keys.toList()..sort(_numericAwareCompare);
     if (query.isNotEmpty) {
-      dirs = dirs.where((d) => d.toLowerCase().contains(query)).toList();
+      dirs = dirs.where((d) => blobMatches(normText(d), query)).toList();
     }
     if (dirs.isEmpty) return const _Empty('No folders');
     return ListView.builder(

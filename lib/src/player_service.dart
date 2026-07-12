@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'bridge.dart';
+import 'db.dart';
 import 'history.dart';
 import 'local_library.dart';
 import 'models.dart';
@@ -234,34 +233,24 @@ class PlayerService {
 
   // ── Queue persistence (Namida-style "restore last session") ────────────────
 
-  File? _queueFile;
-  File? _posFile;
+  AppDatabase? _db;
   bool _queueSavePending = false;
   int _posTicks = 0;
 
   /// Load the last session's queue paused at its saved position.
-  Future<void> initPersistence() async {
+  Future<void> initPersistence(AppDatabase db) async {
+    _db = db;
     try {
-      final docs = await getApplicationDocumentsDirectory();
-      _queueFile = File('${docs.path}${Platform.pathSeparator}queue.json');
-      _posFile = File('${docs.path}${Platform.pathSeparator}queue_pos.json');
-      if (!await _queueFile!.exists()) return;
-      // Large queues decode off the UI thread — startup stays smooth.
-      final j = await compute(_decodeMap, await _queueFile!.readAsString());
-      final tracks = ((j['tracks'] ?? []) as List)
-          .map((t) => Track.fromJson(t as Map<String, dynamic>))
-          .toList();
-      if (tracks.isEmpty) return;
-      var index = 0;
-      var posMs = 0;
-      try {
-        if (await _posFile!.exists()) {
-          final p = jsonDecode(await _posFile!.readAsString())
-              as Map<String, dynamic>;
-          index = (p['index'] as num?)?.toInt() ?? 0;
-          posMs = (p['positionMs'] as num?)?.toInt() ?? 0;
-        }
-      } catch (_) {}
+      final rows = await db.db.query('queue_tracks', orderBy: 'pos ASC');
+      if (rows.isEmpty) return;
+      final tracks = [
+        for (final r in rows)
+          Track.fromJson(
+              jsonDecode(r['track_json'] as String) as Map<String, dynamic>)
+      ];
+      final index = int.tryParse(await db.getKv('queue_index') ?? '') ?? 0;
+      final posMs =
+          int.tryParse(await db.getKv('queue_position_ms') ?? '') ?? 0;
       _queue = tracks;
       queueRevision.value++;
       await _player.setAudioSources(
@@ -271,31 +260,37 @@ class PlayerService {
       );
       // Deliberately not playing — the queue sits ready, like a native player.
     } catch (_) {
-      // Unreachable sources (bridge offline) or corrupt files — start empty.
+      // Unreachable sources (bridge offline) or corrupt rows — start empty.
     }
   }
 
   Future<void> _saveQueueSoon() async {
-    final f = _queueFile;
-    if (f == null || _queueSavePending) return;
+    final db = _db;
+    if (db == null || _queueSavePending) return;
     _queueSavePending = true;
     await Future.delayed(const Duration(seconds: 1));
     _queueSavePending = false;
     try {
-      await f.writeAsString(
-          jsonEncode({'tracks': _queue.map((t) => t.toJson()).toList()}));
+      final snapshot = List.of(_queue);
+      await db.db.transaction((txn) async {
+        await txn.delete('queue_tracks');
+        final batch = txn.batch();
+        for (var i = 0; i < snapshot.length; i++) {
+          batch.insert('queue_tracks',
+              {'pos': i, 'track_json': jsonEncode(snapshot[i].toJson())});
+        }
+        await batch.commit(noResult: true);
+      });
     } catch (_) {}
     _savePosition();
   }
 
   void _savePosition() {
-    final f = _posFile;
-    if (f == null) return;
+    final db = _db;
+    if (db == null) return;
     try {
-      f.writeAsString(jsonEncode({
-        'index': _player.currentIndex ?? 0,
-        'positionMs': _player.position.inMilliseconds,
-      }));
+      db.setKv('queue_index', '${_player.currentIndex ?? 0}');
+      db.setKv('queue_position_ms', '${_player.position.inMilliseconds}');
     } catch (_) {}
   }
 
@@ -441,9 +436,6 @@ class PlayerService {
     await _player.dispose();
   }
 }
-
-Map<String, dynamic> _decodeMap(String raw) =>
-    jsonDecode(raw) as Map<String, dynamic>;
 
 class SleepTimerState {
   final DateTime? endsAt; // minutes mode

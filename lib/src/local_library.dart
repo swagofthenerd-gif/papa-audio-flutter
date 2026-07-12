@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'models.dart';
+import 'text_norm.dart';
 
 /// On-phone music library, read through a small MediaStore platform channel
 /// (see MainActivity.kt). This is the native-player trick: MediaStore already
@@ -15,8 +16,17 @@ class LocalLibrary extends ChangeNotifier {
   String? error;
   List<LocalAlbum> albums = [];
 
+  /// Normalized search blob per track key — title/artist/album/genre/filename
+  /// folded via [normText], so search is diacritic- and case-insensitive.
+  Map<String, String> blobs = {};
+
   /// Bumped on every (re)load — cheap change detection for list memoization.
   int revision = 0;
+
+  /// Multi-field, normalization-aware match. [normQuery] must be normText'd.
+  bool matchesNorm(Track t, String normQuery) => blobMatches(
+      blobs[t.key] ?? normText('${t.title} ${t.artist} ${t.album ?? ''}'),
+      normQuery);
 
   int get trackCount => albums.fold(0, (n, a) => n + a.tracks.length);
 
@@ -52,7 +62,11 @@ class LocalLibrary extends ChangeNotifier {
     notifyListeners();
     try {
       final rows = await _ch.invokeListMethod<Map>('queryTracks') ?? [];
-      albums = _group(rows);
+      // Group + build search blobs off the UI thread — a 20k-track library
+      // must never cost the main isolate a frame.
+      final built = await compute(_buildLibrary, rows);
+      albums = built.albums;
+      blobs = built.blobs;
       revision++;
     } catch (e) {
       error = 'Failed to read music library: $e';
@@ -63,6 +77,19 @@ class LocalLibrary extends ChangeNotifier {
 
   /// Group MediaStore rows into albums, sorted by artist/name, tracks by
   /// disc+track number.
+  static _BuiltLibrary _buildLibrary(List<Map> rows) {
+    final albums = _group(rows);
+    final blobs = <String, String>{};
+    for (final album in albums) {
+      for (final t in album.tracks) {
+        final fileBase = t.filePath.split(RegExp(r'[\\/]')).last;
+        blobs[t.key] = normText(
+            '${t.title} ${t.artist} ${t.album ?? ''} ${t.genre ?? ''} $fileBase');
+      }
+    }
+    return _BuiltLibrary(albums: albums, blobs: blobs);
+  }
+
   static List<LocalAlbum> _group(List<Map> rows) {
     final byAlbum = <int, List<Map>>{};
     for (final r in rows) {
@@ -160,6 +187,12 @@ class LocalLibrary extends ChangeNotifier {
   /// A URI the media notification can resolve for lock-screen artwork.
   static Uri notificationArtUri(int albumId) =>
       Uri.parse('content://media/external/audio/albumart/$albumId');
+}
+
+class _BuiltLibrary {
+  final List<LocalAlbum> albums;
+  final Map<String, String> blobs;
+  const _BuiltLibrary({required this.albums, required this.blobs});
 }
 
 /// An album assembled from the phone's MediaStore rows.

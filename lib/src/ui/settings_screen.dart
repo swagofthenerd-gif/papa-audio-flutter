@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../settings.dart';
 import '../theme.dart';
+import 'dialogs.dart';
 import 'equalizer_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -125,6 +126,55 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
             ),
+            const _Section('Tags'),
+            ListTile(
+              leading: const Icon(Icons.people_outline, color: PA.textSecondary),
+              title: const Text('Artist separators'),
+              subtitle: Text(st.artistSeparators.map((e) => '"$e"').join('  '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+              onTap: () async {
+                final v = await promptText(
+                    context, 'Artist separators (comma-separated)', '; , feat.',
+                    initial: st.artistSeparators.join(','));
+                if (v != null) {
+                  st.update(() => st.artistSeparators = _parseList(v));
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.piano, color: PA.textSecondary),
+              title: const Text('Genre separators'),
+              subtitle: Text(st.genreSeparators.map((e) => '"$e"').join('  '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+              onTap: () async {
+                final v = await promptText(
+                    context, 'Genre separators (comma-separated)', '; /',
+                    initial: st.genreSeparators.join(','));
+                if (v != null) {
+                  st.update(() => st.genreSeparators = _parseList(v));
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.block, color: PA.textSecondary),
+              title: const Text('Never split these names'),
+              subtitle: Text(st.splitBlacklist.join(', '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+              onTap: () async {
+                final v = await promptText(context,
+                    'Never-split names (comma-separated)', 'AC/DC, Simon & Garfunkel',
+                    initial: st.splitBlacklist.join(','));
+                if (v != null) {
+                  st.update(() => st.splitBlacklist = _parseList(v));
+                }
+              },
+            ),
             const _Section('Track tile swipes'),
             _SwipePicker(
               label: 'Swipe right',
@@ -159,6 +209,11 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 }
+
+List<String> _parseList(String v) => [
+      for (final part in v.split(','))
+        if (part.trim().isNotEmpty) part.trim()
+    ];
 
 class _Section extends StatelessWidget {
   final String title;

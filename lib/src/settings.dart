@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'text_norm.dart';
+
 /// User-tunable behavior, persisted with shared_preferences. Kept intentionally
 /// small: every entry here must be surfaced in the settings screen.
 class SettingsService extends ChangeNotifier {
@@ -22,6 +24,19 @@ class SettingsService extends ChangeNotifier {
   // What tapping a track does to the queue.
   TapMode tapMode = TapMode.list;
 
+  // Multi-value tag splitting (Artists / Genres tabs). Conservative defaults —
+  // '&' and '/' split legitimate names too often, so they're opt-in.
+  List<String> artistSeparators = [';', ' feat. ', ' ft. ', ' featuring '];
+  List<String> genreSeparators = [';', '/', ','];
+  List<String> splitBlacklist = ['AC/DC'];
+
+  TagSplitter? _artistSplitter;
+  TagSplitter? _genreSplitter;
+  TagSplitter get artistSplitter => _artistSplitter ??= TagSplitter(
+      separators: artistSeparators, blacklist: splitBlacklist.toSet());
+  TagSplitter get genreSplitter => _genreSplitter ??= TagSplitter(
+      separators: genreSeparators, blacklist: splitBlacklist.toSet());
+
   Future<void> init() async {
     final p = _prefs = await SharedPreferences.getInstance();
     playPauseFade = p.getBool('s.fade') ?? true;
@@ -37,11 +52,16 @@ class SettingsService extends ChangeNotifier {
             .clamp(0, SwipeAction.values.length - 1)];
     tapMode = TapMode.values[(p.getInt('s.tapMode') ?? TapMode.list.index)
         .clamp(0, TapMode.values.length - 1)];
+    artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
+    genreSeparators = p.getStringList('s.genreSeps') ?? genreSeparators;
+    splitBlacklist = p.getStringList('s.splitBlacklist') ?? splitBlacklist;
     notifyListeners();
   }
 
   void update(void Function() change) {
     change();
+    _artistSplitter = null; // separator/blacklist edits rebuild the splitters
+    _genreSplitter = null;
     notifyListeners();
     final p = _prefs;
     if (p == null) return;
@@ -53,6 +73,9 @@ class SettingsService extends ChangeNotifier {
     p.setInt('s.swipeRight', swipeRight.index);
     p.setInt('s.swipeLeft', swipeLeft.index);
     p.setInt('s.tapMode', tapMode.index);
+    p.setStringList('s.artistSeps', artistSeparators);
+    p.setStringList('s.genreSeps', genreSeparators);
+    p.setStringList('s.splitBlacklist', splitBlacklist);
   }
 }
 

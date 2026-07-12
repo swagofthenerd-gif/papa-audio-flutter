@@ -97,4 +97,38 @@ class Bridge {
       return [];
     }
   }
+
+  // ── YouTube ─────────────────────────────────────────────────────────────────
+  // The bridge proxies YouTube (search / audio stream / download-to-library).
+  // Field names are parsed tolerantly — see YtResult.fromJson.
+
+  Future<List<YtResult>> ytSearch(String query) async {
+    final r = await http
+        .get(_u('/api/youtube/search', {'query': query, 'q': query}))
+        .timeout(const Duration(seconds: 30));
+    final body = jsonDecode(r.body);
+    final list =
+        (body is Map ? (body['results'] ?? body['items'] ?? body['videos']) : body) as List? ?? [];
+    return list
+        .map((v) => YtResult.fromJson(v as Map<String, dynamic>))
+        .where((v) => v.id.isNotEmpty)
+        .toList();
+  }
+
+  /// Audio stream URL for a YouTube video (the server extracts/transcodes).
+  String ytStreamUrl(String videoId) =>
+      _u('/api/youtube/stream', {'id': videoId}).toString();
+
+  /// Ask the PC to download a YouTube video into the library.
+  Future<void> ytDownload(YtResult v) async {
+    await http.post(
+      _u('/api/youtube/download'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'id': v.id,
+        'url': 'https://www.youtube.com/watch?v=${v.id}',
+        'title': v.title,
+      }),
+    );
+  }
 }

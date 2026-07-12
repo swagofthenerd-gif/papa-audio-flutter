@@ -1,30 +1,51 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 
 import 'package:papa_audio/main.dart';
+import 'package:papa_audio/src/app_state.dart';
+import 'package:papa_audio/src/models.dart';
+import 'package:papa_audio/src/ui/widgets.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('shows setup screen when no bridge is configured', (tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(value: AppState(), child: const PapaApp()),
+    );
+    expect(find.text('Papa Audio'), findsOneWidget);
+    expect(find.text('Connect'), findsOneWidget);
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  group('YtResult.fromJson tolerates server field variants', () {
+    test('videoId + author + m:ss duration', () {
+      final v = YtResult.fromJson({
+        'videoId': 'abc123xyz00',
+        'title': 'Song',
+        'author': 'Channel',
+        'duration': '3:35',
+      });
+      expect(v.id, 'abc123xyz00');
+      expect(v.channel, 'Channel');
+      expect(v.durationSec, 215);
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('id extracted from a watch URL, thumbnail from list', () {
+      final v = YtResult.fromJson({
+        'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        'title': 'Song',
+        'thumbnails': [
+          {'url': 'https://i.ytimg.com/vi/x/default.jpg'}
+        ],
+        'lengthSeconds': 212,
+      });
+      expect(v.id, 'dQw4w9WgXcQ');
+      expect(v.thumbnail, 'https://i.ytimg.com/vi/x/default.jpg');
+      expect(v.durationSec, 212);
+    });
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('fmtDuration formats minutes and hours', () {
+    expect(fmtDuration(215), '3:35');
+    expect(fmtDuration(3755), '1:02:35');
+    expect(fmtDuration(0), '0:00');
   });
 }

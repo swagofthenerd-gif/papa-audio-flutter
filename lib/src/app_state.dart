@@ -1,14 +1,24 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bridge.dart';
+import 'downloads.dart';
+import 'history.dart';
+import 'local_library.dart';
 import 'models.dart';
 import 'player_service.dart';
+import 'playlists.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
 /// on purpose — screens read exactly what they need and rebuild narrowly.
+/// LocalLibrary, DownloadManager, PlaylistsService and HistoryService are their
+/// own ChangeNotifiers so each tab rebuilds independently of the bridge state.
 class AppState extends ChangeNotifier {
   final Bridge bridge = Bridge();
   late final PlayerService playerService = PlayerService(bridge);
+  final LocalLibrary localLibrary = LocalLibrary();
+  final DownloadManager downloads = DownloadManager();
+  final PlaylistsService playlists = PlaylistsService();
+  final HistoryService history = HistoryService();
 
   bool loading = false;
   String? error;
@@ -19,6 +29,16 @@ class AppState extends ChangeNotifier {
   bool get configured => bridge.configured;
 
   Future<void> restore() async {
+    // Local features first — they work with no bridge at all.
+    playerService.history = history;
+    await Future.wait([
+      downloads.init(),
+      playlists.init(),
+      history.init(),
+    ]);
+    await localLibrary.init();
+    // Bring back last session's queue (paused) once sources are known.
+    await playerService.initPersistence();
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString('bridgeUrl');
     if (saved != null && saved.isNotEmpty) {
@@ -70,4 +90,18 @@ class AppState extends ChangeNotifier {
 
   Future<void> playTrackInList(List<Track> tracks, int index) =>
       playerService.playQueue(tracks, index);
+
+  /// Play a single YouTube result, streamed through the bridge.
+  Future<void> playYt(YtResult v) {
+    final t = Track(
+      id: 'yt:${v.id}',
+      title: v.title,
+      artist: v.channel.isEmpty ? 'YouTube' : v.channel,
+      filePath: '',
+      duration: (v.durationSec ?? 0).toDouble(),
+      sourceUri: bridge.ytStreamUrl(v.id),
+      artUri: v.thumbnail,
+    );
+    return playerService.playQueue([t], 0);
+  }
 }

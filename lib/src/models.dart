@@ -1,5 +1,6 @@
 /// Domain models. Mirror the shapes the Papa Audio bridge returns so JSON maps
 /// straight in.
+library;
 
 class Track {
   final String id;
@@ -12,6 +13,16 @@ class Track {
   final int discNumber;
   final double duration; // seconds; 0 = unknown until played
 
+  /// Full playable URI (content://, file://, http…). When null the track plays
+  /// from the bridge via /stream?path=[filePath]. This is what lets one Track
+  /// type cover PC, on-phone, downloaded and YouTube tracks.
+  final String? sourceUri;
+
+  /// Full artwork URI (http, file://, or the app's `localart://tid/aid`
+  /// convention for MediaStore art). When null, art comes from the bridge's
+  /// /art?path=[artPath].
+  final String? artUri;
+
   const Track({
     required this.id,
     required this.title,
@@ -22,6 +33,8 @@ class Track {
     this.trackNumber = 0,
     this.discNumber = 1,
     this.duration = 0,
+    this.sourceUri,
+    this.artUri,
   });
 
   factory Track.fromJson(Map<String, dynamic> j) => Track(
@@ -38,7 +51,28 @@ class Track {
             ? (j['discNumber'] ?? 1)
             : int.tryParse('${j['discNumber']}') ?? 1,
         duration: (j['duration'] ?? 0).toDouble(),
+        sourceUri: j['sourceUri']?.toString(),
+        artUri: j['artUri']?.toString(),
       );
+
+  /// Round-trips through fromJson — used by playlists/history/queue persistence.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'artist': artist,
+        if (album != null) 'album': album,
+        'filePath': filePath,
+        if (artPath != null) 'artPath': artPath,
+        'trackNumber': trackNumber,
+        'discNumber': discNumber,
+        'duration': duration,
+        if (sourceUri != null) 'sourceUri': sourceUri,
+        if (artUri != null) 'artUri': artUri,
+      };
+
+  /// Stable identity across app runs. Ids are already namespaced by source
+  /// ('local:…', 'yt:…', bridge ids are PC file paths), so id alone works.
+  String get key => id;
 }
 
 class Album {
@@ -101,4 +135,60 @@ class SlskFolder {
         bitrate: j['bitrate'] is int ? j['bitrate'] : null,
         files: ((j['files'] ?? []) as List).map((f) => f.toString()).toList(),
       );
+}
+
+/// A YouTube search result (from /api/youtube/search). The bridge does the
+/// actual talking to YouTube; field names are parsed tolerantly since the
+/// server evolved over time.
+class YtResult {
+  final String id; // video id
+  final String title;
+  final String channel;
+  final String? thumbnail;
+  final int? durationSec;
+
+  const YtResult({
+    required this.id,
+    required this.title,
+    required this.channel,
+    this.thumbnail,
+    this.durationSec,
+  });
+
+  factory YtResult.fromJson(Map<String, dynamic> j) {
+    String id = (j['id'] ?? j['videoId'] ?? '').toString();
+    if (id.isEmpty && j['url'] != null) {
+      final m = RegExp(r'[?&]v=([\w-]{6,})').firstMatch(j['url'].toString());
+      id = m?.group(1) ?? '';
+    }
+    String? thumb = (j['thumbnail'] ?? j['thumb'])?.toString();
+    if (thumb == null && j['thumbnails'] is List && (j['thumbnails'] as List).isNotEmpty) {
+      final first = (j['thumbnails'] as List).first;
+      thumb = first is Map ? first['url']?.toString() : first?.toString();
+    }
+    return YtResult(
+      id: id,
+      title: (j['title'] ?? 'Unknown').toString(),
+      channel: (j['channel'] ?? j['author'] ?? j['uploader'] ?? j['channelTitle'] ?? '').toString(),
+      thumbnail: thumb,
+      durationSec: _parseDuration(j['duration'] ?? j['durationSec'] ?? j['lengthSeconds']),
+    );
+  }
+
+  /// Accepts 215, "215", or "3:35".
+  static int? _parseDuration(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is double) return v.round();
+    final s = v.toString().trim();
+    if (s.contains(':')) {
+      final parts = s.split(':').map((p) => int.tryParse(p) ?? 0).toList();
+      var secs = 0;
+      for (final p in parts) {
+        secs = secs * 60 + p;
+      }
+      return secs;
+    }
+    return int.tryParse(s);
+  }
 }

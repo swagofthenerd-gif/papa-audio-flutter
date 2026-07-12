@@ -33,7 +33,7 @@ ThemeData papaTheme() {
       fontFamily: 'Roboto',
     ),
     iconTheme: const IconThemeData(color: PA.textSecondary),
-    splashColor: PA.accent.withOpacity(0.12),
-    highlightColor: PA.accent.withOpacity(0.08),
+    splashColor: PA.accent.withValues(alpha: 0.12),
+    highlightColor: PA.accent.withValues(alpha: 0.08),
   );
 }

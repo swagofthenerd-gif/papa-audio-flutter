@@ -48,7 +48,8 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [ ] Subpage inline search — filter tracks inside album/artist/playlist pages (W2)
 - [ ] Recently added page — full list by date added with age labels (W2)
 - [ ] Folder tree mode — hierarchy navigation with breadcrumb, subfolder counts, default-folder bookmark, flat toggle (W2)
-- [ ] Go-to album/artist/folder from track menu + animated jump-to-track pill; "add more from this X" (W2)
+- [x] Go to artist / Go to album — from the full player (tap title/artist) and every track menu; artist hub shows YouTube → PC → on-phone sections
+- [ ] Go-to folder, animated jump-to-track pill, "add more from this X" (W2)
 - [x] A–Z letter rail — drag or tap to jump alphabetically sorted track lists, with letter bubble
 - [ ] Track info depth — every tag field tappable-to-copy, format block, isolated preview player that pauses main playback (W2)
 - [ ] Library refresh — pull-to-refresh diff rescan, refresh-on-startup option, full re-index with live progress (W2)

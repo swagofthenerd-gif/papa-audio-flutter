@@ -7,6 +7,7 @@ import 'src/app_state.dart';
 import 'src/models.dart';
 import 'src/theme.dart';
 import 'src/ui/downloads_tab.dart';
+import 'src/ui/home_tab.dart';
 import 'src/ui/library_tab.dart';
 import 'src/ui/player_sheet.dart';
 import 'src/ui/search_tab.dart';
@@ -50,8 +51,8 @@ class Root extends StatelessWidget {
   const Root({super.key});
   @override
   Widget build(BuildContext context) {
-    final configured = context.select<AppState, bool>((s) => s.configured);
-    return configured ? const Shell() : const SetupScreen();
+    final ready = context.select<AppState, bool>((s) => s.ready);
+    return ready ? const Shell() : const SetupScreen();
   }
 }
 
@@ -124,6 +125,15 @@ class _SetupScreenState extends State<SetupScreen> {
                               color: Colors.black,
                               fontWeight: FontWeight.bold)),
                 ),
+              ),
+              const SizedBox(height: 8),
+              // Local-library users don't need a PC — let them straight in.
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => context.read<AppState>().enterLocalOnly(),
+                child: const Text('Skip — use only music on this phone',
+                    style: TextStyle(color: PA.textSecondary)),
               ),
             ],
           ),
@@ -201,35 +211,6 @@ class _ShellState extends State<Shell> {
           ),
           Positioned.fill(child: PlayerSheet(navHeight: navHeight)),
         ],
-      ),
-    );
-  }
-}
-
-// ── Home: PC library grid ─────────────────────────────────────────────────────
-class HomeTab extends StatelessWidget {
-  const HomeTab({super.key});
-  @override
-  Widget build(BuildContext context) {
-    final s = context.watch<AppState>();
-    if (s.loading && s.albums.isEmpty) {
-      return const Center(child: CircularProgressIndicator(color: PA.accent));
-    }
-    if (s.error != null && s.albums.isEmpty) {
-      return ErrorView(message: s.error!, onRetry: s.loadLibrary);
-    }
-    return RefreshIndicator(
-      color: PA.accent,
-      onRefresh: s.loadLibrary,
-      child: GridView.builder(
-        padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.78,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12),
-        itemCount: s.albums.length,
-        itemBuilder: (_, i) => AlbumCard(album: s.albums[i]),
       ),
     );
   }

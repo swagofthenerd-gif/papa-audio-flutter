@@ -39,6 +39,22 @@ class AppState extends ChangeNotifier {
   String? get baseUrl => bridge.baseUrl;
   bool get configured => bridge.configured;
 
+  /// True once the user chose "use on-phone music only" — lets the app enter
+  /// the main shell without a PC bridge so local-library users aren't stranded
+  /// on the connect screen.
+  bool localOnly = false;
+
+  /// The app can show its main UI once either a bridge is set OR the user opted
+  /// into local-only mode.
+  bool get ready => configured || localOnly;
+
+  Future<void> enterLocalOnly() async {
+    localOnly = true;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('localOnly', true);
+    notifyListeners();
+  }
+
   Future<void> restore() async {
     // Local features first — they work with no bridge at all.
     playerService.history = history;
@@ -57,11 +73,14 @@ class AppState extends ChangeNotifier {
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence();
     final prefs = await SharedPreferences.getInstance();
+    localOnly = prefs.getBool('localOnly') ?? false;
     final saved = prefs.getString('bridgeUrl');
     if (saved != null && saved.isNotEmpty) {
       bridge.baseUrl = saved;
       notifyListeners();
       await loadLibrary();
+    } else if (localOnly) {
+      notifyListeners();
     }
   }
 

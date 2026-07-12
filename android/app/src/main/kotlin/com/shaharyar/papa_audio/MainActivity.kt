@@ -31,7 +31,9 @@ import java.util.concurrent.Executors
  *   getArt(trackId, albumId, size) -> ByteArray? (JPEG)
  */
 class MainActivity : FlutterActivity() {
-    private val executor = Executors.newSingleThreadExecutor()
+    // Two workers: a burst of artwork requests while fling-scrolling a grid
+    // shouldn't queue behind one long decode.
+    private val executor = Executors.newFixedThreadPool(2)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingPermissionResult: MethodChannel.Result? = null
 

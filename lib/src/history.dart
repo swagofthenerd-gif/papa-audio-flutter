@@ -22,6 +22,10 @@ class HistoryService extends ChangeNotifier {
   final Map<String, int> firstListen = {}; // track key → epoch ms of first listen
   final Map<String, Track> _byKey = {}; // latest Track snapshot per key
 
+  /// Bumped on any content change — lets views memoize derived structures
+  /// (day groups, rankings) instead of recomputing on every rebuild.
+  int revision = 0;
+
   File? _file;
   bool _dirty = false;
 
@@ -47,6 +51,7 @@ class HistoryService extends ChangeNotifier {
       entries.clear();
       counts.clear();
     }
+    revision++;
     notifyListeners();
   }
 
@@ -83,6 +88,7 @@ class HistoryService extends ChangeNotifier {
     firstListen.putIfAbsent(t.key, () => now);
     _byKey[t.key] = t;
     _dirty = true;
+    revision++;
     notifyListeners();
     _saveSoon();
   }
@@ -92,6 +98,7 @@ class HistoryService extends ChangeNotifier {
     final left = counts.update(e.track.key, (n) => n - 1, ifAbsent: () => 0);
     if (left <= 0) counts.remove(e.track.key);
     _dirty = true;
+    revision++;
     notifyListeners();
     _saveSoon();
   }
@@ -102,6 +109,7 @@ class HistoryService extends ChangeNotifier {
     firstListen.clear();
     _byKey.clear();
     _dirty = true;
+    revision++;
     notifyListeners();
     _saveSoon();
   }

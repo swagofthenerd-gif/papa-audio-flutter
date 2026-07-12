@@ -119,8 +119,11 @@ class LocalLibrary extends ChangeNotifier {
   // ── Artwork ─────────────────────────────────────────────────────────────────
   // MediaStore art can't be loaded as a network image, so it comes over the
   // channel as bytes, memoized per album (art is per-album in practice).
+  // The cache is a bounded LRU: hours of browsing must never accumulate
+  // unbounded image bytes in memory.
 
-  static final Map<String, Future<Uint8List?>> _artCache = {};
+  static const _artCacheCap = 220;
+  static final _artCache = <String, Future<Uint8List?>>{}; // LinkedHashMap = LRU order
 
   /// Load art for a `localart://trackId/albumId` URI at roughly [size] px.
   static Future<Uint8List?> artForUri(String localArtUri, {int size = 300}) {
@@ -131,7 +134,12 @@ class LocalLibrary extends ChangeNotifier {
 
   static Future<Uint8List?> art(int trackId, int albumId, {int size = 300}) {
     final key = '$albumId@$size';
-    return _artCache.putIfAbsent(key, () async {
+    final hit = _artCache.remove(key);
+    if (hit != null) {
+      _artCache[key] = hit; // re-insert = mark most recently used
+      return hit;
+    }
+    final future = () async {
       try {
         return await _ch.invokeMethod<Uint8List>('getArt', {
           'trackId': trackId,
@@ -141,7 +149,12 @@ class LocalLibrary extends ChangeNotifier {
       } catch (_) {
         return null;
       }
-    });
+    }();
+    _artCache[key] = future;
+    while (_artCache.length > _artCacheCap) {
+      _artCache.remove(_artCache.keys.first); // evict least recently used
+    }
+    return future;
   }
 
   /// A URI the media notification can resolve for lock-screen artwork.

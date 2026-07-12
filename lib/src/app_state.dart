@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bridge.dart';
 import 'downloads.dart';
@@ -22,6 +23,10 @@ class AppState extends ChangeNotifier {
   final HistoryService history = HistoryService();
   final SettingsService settings = SettingsService();
 
+  // Flush pending listens the moment the app leaves the foreground, so an OS
+  // process kill after hours of playback never loses history.
+  AppLifecycleListener? _lifecycle;
+
   bool loading = false;
   String? error;
   List<Album> albums = [];
@@ -33,6 +38,7 @@ class AppState extends ChangeNotifier {
   Future<void> restore() async {
     // Local features first — they work with no bridge at all.
     playerService.history = history;
+    _lifecycle ??= AppLifecycleListener(onInactive: () => history.flush());
     await Future.wait([
       downloads.init(),
       playlists.init(),

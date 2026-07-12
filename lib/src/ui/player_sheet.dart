@@ -221,23 +221,27 @@ class _MiniBarState extends State<_MiniBar> {
       onHorizontalDragEnd: _onHDragEnd,
       child: Column(
         children: [
-          StreamBuilder<Duration?>(
-            stream: ps.duration,
-            builder: (_, durSnap) {
-              final total = durSnap.data?.inMilliseconds ?? 0;
-              return StreamBuilder<Duration>(
-                stream: ps.position,
-                builder: (_, posSnap) {
-                  final pos = posSnap.data?.inMilliseconds ?? 0;
-                  return LinearProgressIndicator(
-                    value: total > 0 ? (pos / total).clamp(0.0, 1.0) : 0,
-                    minHeight: 2,
-                    color: PA.accent,
-                    backgroundColor: Colors.transparent,
-                  );
-                },
-              );
-            },
+          // RepaintBoundary: the strip updates ~5x/s for hours — it must
+          // repaint alone, not drag the artwork/text row with it.
+          RepaintBoundary(
+            child: StreamBuilder<Duration?>(
+              stream: ps.duration,
+              builder: (_, durSnap) {
+                final total = durSnap.data?.inMilliseconds ?? 0;
+                return StreamBuilder<Duration>(
+                  stream: ps.position,
+                  builder: (_, posSnap) {
+                    final pos = posSnap.data?.inMilliseconds ?? 0;
+                    return LinearProgressIndicator(
+                      value: total > 0 ? (pos / total).clamp(0.0, 1.0) : 0,
+                      minHeight: 2,
+                      color: PA.accent,
+                      backgroundColor: Colors.transparent,
+                    );
+                  },
+                );
+              },
+            ),
           ),
           Expanded(
             child: Row(
@@ -449,7 +453,9 @@ class _SeekBarState extends State<SeekBar> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<Duration?>(
+    // Boundary keeps the ~5x/s position updates repainting only the slider.
+    return RepaintBoundary(
+      child: StreamBuilder<Duration?>(
       stream: widget.ps.duration,
       builder: (_, durSnap) {
         final total = durSnap.data?.inMilliseconds.toDouble() ?? 0;
@@ -503,6 +509,7 @@ class _SeekBarState extends State<SeekBar> {
           },
         );
       },
+      ),
     );
   }
 }

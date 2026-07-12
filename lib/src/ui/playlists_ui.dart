@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../history.dart';
+import '../models.dart';
 import '../playlists.dart';
 import '../theme.dart';
 import 'dialogs.dart';
@@ -214,9 +215,37 @@ class PlaylistScreen extends StatelessWidget {
 
 // ── History ───────────────────────────────────────────────────────────────────
 
-class HistoryView extends StatelessWidget {
+class HistoryView extends StatefulWidget {
   final String query;
   const HistoryView({super.key, required this.query});
+  @override
+  State<HistoryView> createState() => _HistoryViewState();
+}
+
+class _HistoryViewState extends State<HistoryView> {
+  // Day-grouping over thousands of entries is memoized by history revision so
+  // background listen events never trigger full regroups of a hidden tab.
+  Map<String, List<HistoryEntry>> _groups = const {};
+  String _sig = '';
+
+  Map<String, List<HistoryEntry>> _grouped(HistoryService h, String query) {
+    final sig = '${h.revision}|$query';
+    if (sig == _sig) return _groups;
+    _sig = sig;
+    var entries = h.entries;
+    if (query.isNotEmpty) {
+      entries = entries
+          .where((e) =>
+              e.track.title.toLowerCase().contains(query) ||
+              e.track.artist.toLowerCase().contains(query))
+          .toList();
+    }
+    final groups = <String, List<HistoryEntry>>{};
+    for (final e in entries) {
+      groups.putIfAbsent(_dayLabel(e.at), () => []).add(e);
+    }
+    return _groups = groups;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -224,23 +253,11 @@ class HistoryView extends StatelessWidget {
     return AnimatedBuilder(
       animation: s.history,
       builder: (context, _) {
-        var entries = s.history.entries;
-        if (query.isNotEmpty) {
-          entries = entries
-              .where((e) =>
-                  e.track.title.toLowerCase().contains(query) ||
-                  e.track.artist.toLowerCase().contains(query))
-              .toList();
-        }
-        if (entries.isEmpty) {
+        final groups = _grouped(s.history, widget.query);
+        if (groups.isEmpty) {
           return const Center(
               child: Text('Nothing played yet',
                   style: TextStyle(color: PA.textSecondary)));
-        }
-        // Group by calendar day (entries are newest first).
-        final groups = <String, List<HistoryEntry>>{};
-        for (final e in entries) {
-          groups.putIfAbsent(_dayLabel(e.at), () => []).add(e);
         }
         return ListView(
           padding: const EdgeInsets.only(bottom: 80),
@@ -333,6 +350,10 @@ class MostPlayedView extends StatefulWidget {
 class _MostPlayedViewState extends State<MostPlayedView> {
   _Range _range = _Range.all;
 
+  // Ranking is memoized by history revision — hidden-tab rebuilds are free.
+  List<(Track, int)> _ranked = const [];
+  String _sig = '';
+
   DateTime? get _since {
     final now = DateTime.now();
     return switch (_range) {
@@ -344,20 +365,28 @@ class _MostPlayedViewState extends State<MostPlayedView> {
     };
   }
 
+  List<(Track, int)> _rank(HistoryService h) {
+    final sig = '${h.revision}|$_range|${widget.query}';
+    if (sig == _sig) return _ranked;
+    _sig = sig;
+    var ranked = h.mostPlayed(since: _since, limit: 200);
+    if (widget.query.isNotEmpty) {
+      ranked = ranked
+          .where((r) =>
+              r.$1.title.toLowerCase().contains(widget.query) ||
+              r.$1.artist.toLowerCase().contains(widget.query))
+          .toList();
+    }
+    return _ranked = ranked;
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
     return AnimatedBuilder(
       animation: s.history,
       builder: (context, _) {
-        var ranked = s.history.mostPlayed(since: _since, limit: 200);
-        if (widget.query.isNotEmpty) {
-          ranked = ranked
-              .where((r) =>
-                  r.$1.title.toLowerCase().contains(widget.query) ||
-                  r.$1.artist.toLowerCase().contains(widget.query))
-              .toList();
-        }
+        final ranked = _rank(s.history);
         return Column(
           children: [
             SizedBox(

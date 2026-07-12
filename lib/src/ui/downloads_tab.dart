@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -18,21 +19,38 @@ class DownloadsTab extends StatefulWidget {
 class _DownloadsTabState extends State<DownloadsTab> {
   Timer? _poll;
   List<dynamic> _transfers = [];
+  ValueListenable<TickerModeData>? _visible; // TickerMode notifier from the shell
 
   @override
   void initState() {
     super.initState();
-    _refreshTransfers();
     _poll = Timer.periodic(const Duration(seconds: 3), (_) => _refreshTransfers());
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _visible?.removeListener(_onVisibility);
+    _visible = TickerMode.getValuesNotifier(context)..addListener(_onVisibility);
+    if (_visible!.value.enabled) _refreshTransfers();
+  }
+
+  void _onVisibility() {
+    // Refresh immediately when the tab comes back into view.
+    if (_visible?.value.enabled ?? false) _refreshTransfers();
+  }
+
+  @override
   void dispose() {
+    _visible?.removeListener(_onVisibility);
     _poll?.cancel();
     super.dispose();
   }
 
   Future<void> _refreshTransfers() async {
+    // Never poll the PC while this tab is hidden — hours of background use
+    // must not generate a request every 3 seconds.
+    if (!(_visible?.value.enabled ?? true)) return;
     final s = context.read<AppState>();
     if (!s.configured) return;
     final t = await s.bridge.slskTransfers();

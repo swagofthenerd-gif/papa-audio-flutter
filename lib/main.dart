@@ -155,7 +155,15 @@ class _ShellState extends State<Shell> {
               Expanded(
                 child: SafeArea(
                   bottom: false,
-                  child: IndexedStack(index: _tab, children: _pages),
+                  // TickerMode lets hidden tabs know they're offscreen, so
+                  // they can pause timers/polling (see DownloadsTab).
+                  child: IndexedStack(
+                    index: _tab,
+                    children: [
+                      for (var i = 0; i < _pages.length; i++)
+                        TickerMode(enabled: i == _tab, child: _pages[i]),
+                    ],
+                  ),
                 ),
               ),
               // Reserve the mini player's slot when a track is loaded.

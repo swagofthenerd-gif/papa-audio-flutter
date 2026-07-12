@@ -242,10 +242,16 @@ class _TracksView extends StatefulWidget {
   State<_TracksView> createState() => _TracksViewState();
 }
 
-class _TracksViewState extends State<_TracksView> {
+class _TracksViewState extends State<_TracksView>
+    with AutomaticKeepAliveClientMixin {
   static const _rowHeight = 64.0;
   final _scroll = ScrollController();
   String? _railLetter; // letter under the finger while dragging the rail
+
+  // Keep the state (scroll offset + memoized sort) alive across library
+  // sub-tab switches — coming back to Tracks must be instant.
+  @override
+  bool get wantKeepAlive => true;
 
   // Filter + sort results are memoized: recomputed only when the inputs
   // actually change, never on incidental rebuilds (scroll, player events).
@@ -260,8 +266,12 @@ class _TracksViewState extends State<_TracksView> {
   }
 
   void _recompute(AppState s) {
+    // History-based sorts also refresh when listen data changes.
+    final historyBased = widget.sort == TrackSort.mostPlayed ||
+        widget.sort == TrackSort.firstListen;
     final sig =
-        '${widget.query}|${widget.sort.index}|${widget.reverse}|${widget.lib.revision}';
+        '${widget.query}|${widget.sort.index}|${widget.reverse}|${widget.lib.revision}'
+        '${historyBased ? '|${s.history.revision}' : ''}';
     if (sig == _sig) return;
     _sig = sig;
 
@@ -291,6 +301,7 @@ class _TracksViewState extends State<_TracksView> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // AutomaticKeepAliveClientMixin contract
     final s = context.read<AppState>();
     _recompute(s);
     final tracks = _tracks;

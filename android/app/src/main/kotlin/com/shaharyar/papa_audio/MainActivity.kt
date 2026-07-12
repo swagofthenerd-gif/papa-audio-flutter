@@ -106,7 +106,8 @@ class MainActivity : FlutterActivity() {
     private fun queryTracks(): List<Map<String, Any?>> {
         val out = mutableListOf<Map<String, Any?>>()
         val base = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val cols = arrayOf(
+        val hasGenreCol = Build.VERSION.SDK_INT >= 30 // GENRE joined into Media on R+
+        val cols = mutableListOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ARTIST,
@@ -114,10 +115,12 @@ class MainActivity : FlutterActivity() {
             MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.TRACK,
+            MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.DATA
         )
-        contentResolver.query(base, cols, MediaStore.Audio.Media.IS_MUSIC + " != 0", null, null)
+        if (hasGenreCol) cols.add(MediaStore.Audio.Media.GENRE)
+        contentResolver.query(base, cols.toTypedArray(), MediaStore.Audio.Media.IS_MUSIC + " != 0", null, null)
             ?.use { c ->
                 val iId = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val iTitle = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
@@ -126,8 +129,10 @@ class MainActivity : FlutterActivity() {
                 val iAlbumId = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                 val iDur = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val iTrack = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
+                val iYear = c.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
                 val iDate = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 val iData = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val iGenre = if (hasGenreCol) c.getColumnIndex(MediaStore.Audio.Media.GENRE) else -1
                 while (c.moveToNext()) {
                     val id = c.getLong(iId)
                     // TRACK packs disc + track as disc*1000 + n (e.g. 2003 = disc 2 track 3).
@@ -142,6 +147,8 @@ class MainActivity : FlutterActivity() {
                             "durationMs" to c.getLong(iDur),
                             "track" to rawTrack % 1000,
                             "disc" to if (rawTrack >= 1000) rawTrack / 1000 else 1,
+                            "year" to c.getInt(iYear),
+                            "genre" to if (iGenre >= 0) c.getString(iGenre) else null,
                             "dateAdded" to c.getLong(iDate),
                             "path" to c.getString(iData),
                             "uri" to ContentUris.withAppendedId(base, id).toString()

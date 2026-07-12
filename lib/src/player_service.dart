@@ -11,20 +11,27 @@ import 'bridge.dart';
 import 'history.dart';
 import 'local_library.dart';
 import 'models.dart';
+import 'settings.dart';
 
 /// Native gapless playback via just_audio + a background/lock-screen handler.
 /// This is the layer that gives the "buttery" feel — audio runs on the platform
 /// side, not in a JS bridge. Also owns the queue (with in-place edits), the
-/// sleep timer, playback speed, and feeds listen ticks to [HistoryService].
+/// sleep timer, playback speed/pitch, the equalizer pipeline, and feeds listen
+/// ticks to [HistoryService].
 class PlayerService {
   final Bridge bridge;
-  final AudioPlayer _player = AudioPlayer();
+  final AndroidEqualizer equalizer = AndroidEqualizer();
+  final AndroidLoudnessEnhancer loudness = AndroidLoudnessEnhancer();
+  late final AudioPlayer _player = AudioPlayer(
+    audioPipeline: AudioPipeline(androidAudioEffects: [loudness, equalizer]),
+  );
   List<Track> _queue = [];
 
   /// Queue edits (add/remove/reorder) bump this so UI lists rebuild.
   final ValueNotifier<int> queueRevision = ValueNotifier(0);
 
   HistoryService? history;
+  SettingsService? settings;
   Timer? _tick;
 
   PlayerService(this.bridge) {
@@ -37,6 +44,16 @@ class PlayerService {
       _sleepOnTick();
       if (++_posTicks % 5 == 0) _savePosition();
     });
+    // Chained play-next resets once playback moves to a new track.
+    _player.currentIndexStream.listen((_) => _lastInsert = null);
+  }
+
+  /// Apply persisted audio settings once they're loaded.
+  Future<void> applySettings(SettingsService s) async {
+    settings = s;
+    try {
+      await _player.setSkipSilenceEnabled(s.skipSilence);
+    } catch (_) {}
   }
 
   AudioPlayer get player => _player;
@@ -116,11 +133,20 @@ class PlayerService {
     _player.play();
   }
 
-  /// Insert right after the current track ("play next").
+  int? _lastInsert; // where the last play-next landed, for chaining
+
+  /// Insert right after the current track ("play next"). Successive calls
+  /// chain: A, B, C inserted while a track plays will play in A→B→C order
+  /// instead of C→B→A.
   Future<void> playNext(Track t) async {
     if (_queue.isEmpty) return playQueue([t], 0);
-    final at = (_player.currentIndex ?? -1) + 1;
+    final current = _player.currentIndex ?? -1;
+    var at = (_lastInsert != null && _lastInsert! > current)
+        ? _lastInsert! + 1
+        : current + 1;
+    at = at.clamp(0, _queue.length);
     _queue.insert(at, t);
+    _lastInsert = at;
     queueRevision.value++;
     _saveQueueSoon();
     await _player.insertAudioSource(at, _sourceFor(t));
@@ -135,12 +161,58 @@ class PlayerService {
     await _player.addAudioSource(_sourceFor(t));
   }
 
-  Future<void> removeFromQueue(int index) async {
-    if (index < 0 || index >= _queue.length || _queue.length <= 1) return;
-    _queue.removeAt(index);
+  /// Removes and returns the track so callers can offer undo.
+  Future<Track?> removeFromQueue(int index) async {
+    if (index < 0 || index >= _queue.length || _queue.length <= 1) return null;
+    final removed = _queue.removeAt(index);
     queueRevision.value++;
     _saveQueueSoon();
     await _player.removeAudioSourceAt(index);
+    return removed;
+  }
+
+  /// Undo helper — puts a removed track back at its original slot.
+  Future<void> insertAt(int index, Track t) async {
+    if (_queue.isEmpty) return playQueue([t], 0);
+    final at = index.clamp(0, _queue.length);
+    _queue.insert(at, t);
+    queueRevision.value++;
+    _saveQueueSoon();
+    await _player.insertAudioSource(at, _sourceFor(t));
+  }
+
+  /// Bulk removals, Namida-style. Returns how many rows went away.
+  Future<int> removeDuplicates() => _removeWhere((i, t) {
+        final firstIdx = _queue.indexWhere((x) => x.key == t.key);
+        return firstIdx != i && i != (_player.currentIndex ?? -1);
+      });
+
+  Future<int> removeAllPrevious() async {
+    final current = _player.currentIndex ?? 0;
+    return _removeWhere((i, _) => i < current);
+  }
+
+  Future<int> removeAllNext() async {
+    final current = _player.currentIndex ?? 0;
+    return _removeWhere((i, _) => i > current);
+  }
+
+  Future<int> _removeWhere(bool Function(int, Track) test) async {
+    var removed = 0;
+    // Walk backwards so earlier indices stay valid while removing.
+    for (var i = _queue.length - 1; i >= 0; i--) {
+      if (_queue.length <= 1) break;
+      if (test(i, _queue[i])) {
+        _queue.removeAt(i);
+        await _player.removeAudioSourceAt(i);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      queueRevision.value++;
+      _saveQueueSoon();
+    }
+    return removed;
   }
 
   Future<void> moveInQueue(int from, int to) async {
@@ -223,8 +295,33 @@ class PlayerService {
 
   // ── Transport ───────────────────────────────────────────────────────────────
 
-  Future<void> togglePlay() =>
-      _player.playing ? _player.pause() : _player.play();
+  /// Play/pause with a short volume ramp (when enabled) instead of hard cuts.
+  Future<void> togglePlay() async {
+    final s = settings;
+    final fade = s?.playPauseFade ?? false;
+    final ms = s?.fadeMs ?? 300;
+    if (!fade) {
+      return _player.playing ? _player.pause() : _player.play();
+    }
+    final target = _player.volume <= 0 ? 1.0 : _player.volume;
+    if (_player.playing) {
+      await _ramp(target, 0, ms);
+      await _player.pause();
+      await _player.setVolume(target);
+    } else {
+      await _player.setVolume(0);
+      _player.play();
+      await _ramp(0, target, ms);
+    }
+  }
+
+  Future<void> _ramp(double from, double to, int ms) async {
+    const steps = 8;
+    for (var i = 1; i <= steps; i++) {
+      await _player.setVolume(from + (to - from) * i / steps);
+      await Future.delayed(Duration(milliseconds: ms ~/ steps));
+    }
+  }
   Future<void> next() => _player.seekToNext();
   Future<void> previous() => _player.seekToPrevious();
   Future<void> seek(Duration d) => _player.seek(d);
@@ -250,8 +347,19 @@ class PlayerService {
     return _player.setLoopMode(next);
   }
 
-  Future<void> setSpeed(double speed) => _player.setSpeed(speed.clamp(0.25, 3.0));
+  Future<void> setSpeed(double speed) async {
+    speed = speed.clamp(0.25, 3.0);
+    await _player.setSpeed(speed);
+    if (settings?.linkSpeedPitch ?? false) await _player.setPitch(speed);
+  }
+
   double get speed => _player.speed;
+
+  Future<void> setPitch(double pitch) => _player.setPitch(pitch.clamp(0.5, 2.0));
+  double get pitch => _player.pitch;
+  Stream<double> get pitchStream => _player.pitchStream;
+
+  Future<void> setSkipSilence(bool on) => _player.setSkipSilenceEnabled(on);
 
   // ── Sleep timer ─────────────────────────────────────────────────────────────
 

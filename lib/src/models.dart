@@ -23,6 +23,10 @@ class Track {
   /// /art?path=[artPath].
   final String? artUri;
 
+  final int year; // 0 = unknown
+  final String? genre;
+  final int dateAdded; // epoch seconds (MediaStore convention); 0 = unknown
+
   const Track({
     required this.id,
     required this.title,
@@ -35,6 +39,9 @@ class Track {
     this.duration = 0,
     this.sourceUri,
     this.artUri,
+    this.year = 0,
+    this.genre,
+    this.dateAdded = 0,
   });
 
   factory Track.fromJson(Map<String, dynamic> j) => Track(
@@ -53,6 +60,9 @@ class Track {
         duration: (j['duration'] ?? 0).toDouble(),
         sourceUri: j['sourceUri']?.toString(),
         artUri: j['artUri']?.toString(),
+        year: (j['year'] as num?)?.toInt() ?? 0,
+        genre: j['genre']?.toString(),
+        dateAdded: (j['dateAdded'] as num?)?.toInt() ?? 0,
       );
 
   /// Round-trips through fromJson — used by playlists/history/queue persistence.
@@ -68,6 +78,9 @@ class Track {
         'duration': duration,
         if (sourceUri != null) 'sourceUri': sourceUri,
         if (artUri != null) 'artUri': artUri,
+        if (year != 0) 'year': year,
+        if (genre != null) 'genre': genre,
+        if (dateAdded != 0) 'dateAdded': dateAdded,
       };
 
   /// Stable identity across app runs. Ids are already namespaced by source

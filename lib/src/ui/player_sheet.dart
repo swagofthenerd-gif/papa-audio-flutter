@@ -7,6 +7,7 @@ import '../models.dart';
 import '../player_service.dart';
 import '../theme.dart';
 import 'dialogs.dart';
+import 'equalizer_screen.dart';
 import 'widgets.dart';
 
 /// The persistent player: a mini bar above the nav bar that the user drags up
@@ -399,6 +400,18 @@ class _FullPlayer extends StatelessWidget {
                   );
                 },
               ),
+              StreamBuilder<bool>(
+                stream: ps.equalizer.enabledStream,
+                builder: (_, snap) => IconButton(
+                  icon: Icon(Icons.equalizer,
+                      size: 20,
+                      color: (snap.data ?? false) ? PA.accent : PA.textMuted),
+                  onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const EqualizerScreen())),
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.more_horiz, size: 20, color: PA.textMuted),
                 onPressed: () => showTrackMenu(context, track),
@@ -589,12 +602,31 @@ void showQueueSheet(BuildContext context, PlayerService ps) {
   );
 }
 
-class _QueueSheet extends StatelessWidget {
+class _QueueSheet extends StatefulWidget {
   final PlayerService ps;
   const _QueueSheet({required this.ps});
+  @override
+  State<_QueueSheet> createState() => _QueueSheetState();
+}
+
+class _QueueSheetState extends State<_QueueSheet> {
+  static const _rowHeight = 64.0;
+  late final ScrollController _scroll = ScrollController(
+    // Open with the playing track a couple of rows from the top.
+    initialScrollOffset:
+        (((widget.ps.player.currentIndex ?? 0) - 2) * _rowHeight)
+            .clamp(0.0, double.infinity),
+  );
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ps = widget.ps;
     return SizedBox(
       height: MediaQuery.sizeOf(context).height * 0.65,
       child: ValueListenableBuilder<int>(
@@ -614,11 +646,51 @@ class _QueueSheet extends StatelessWidget {
                           style: const TextStyle(
                               fontSize: 16, fontWeight: FontWeight.bold)),
                       const Spacer(),
+                      IconButton(
+                        tooltip: 'Jump to current',
+                        icon: const Icon(Icons.my_location,
+                            size: 18, color: PA.textSecondary),
+                        onPressed: () => _scroll.animateTo(
+                          ((current - 2) * _rowHeight)
+                              .clamp(0.0, _scroll.position.maxScrollExtent),
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                        ),
+                      ),
+                      PopupMenuButton<String>(
+                        color: PA.surfaceElevated,
+                        icon: const Icon(Icons.more_vert,
+                            size: 18, color: PA.textSecondary),
+                        onSelected: (v) async {
+                          final n = switch (v) {
+                            'dups' => await ps.removeDuplicates(),
+                            'prev' => await ps.removeAllPrevious(),
+                            'next' => await ps.removeAllNext(),
+                            _ => 0,
+                          };
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                content: Text('Removed $n tracks'),
+                                duration: const Duration(milliseconds: 1200)));
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                              value: 'dups', child: Text('Remove duplicates')),
+                          PopupMenuItem(
+                              value: 'prev',
+                              child: Text('Remove all previous')),
+                          PopupMenuItem(
+                              value: 'next', child: Text('Remove all next')),
+                        ],
+                      ),
                     ],
                   ),
                 ),
                 Expanded(
                   child: ReorderableListView.builder(
+                    scrollController: _scroll,
+                    itemExtent: _rowHeight,
                     itemCount: queue.length,
                     onReorderItem: (from, to) => ps.moveInQueue(from, to),
                     itemBuilder: (_, i) {
@@ -635,7 +707,23 @@ class _QueueSheet extends StatelessWidget {
                           padding: const EdgeInsets.only(right: 20),
                           child: const Icon(Icons.delete, color: Colors.white),
                         ),
-                        onDismissed: (_) => ps.removeFromQueue(i),
+                        onDismissed: (_) async {
+                          final removed = await ps.removeFromQueue(i);
+                          if (removed != null && context.mounted) {
+                            ScaffoldMessenger.of(context)
+                              ..clearSnackBars()
+                              ..showSnackBar(SnackBar(
+                                content: Text('Removed ${removed.title}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                                action: SnackBarAction(
+                                  label: 'UNDO',
+                                  textColor: PA.accent,
+                                  onPressed: () => ps.insertAt(i, removed),
+                                ),
+                              ));
+                          }
+                        },
                         child: ListTile(
                           leading: TrackArt(
                               artUri: t.artUri,

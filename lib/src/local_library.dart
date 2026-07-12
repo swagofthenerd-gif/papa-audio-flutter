@@ -86,6 +86,9 @@ class LocalLibrary extends ChangeNotifier {
           duration: ((r['durationMs'] as num?) ?? 0).toDouble() / 1000.0,
           sourceUri: (r['uri'] ?? '').toString(),
           artUri: 'localart://$id/${e.key}',
+          year: ((r['year'] as num?) ?? 0).toInt(),
+          genre: r['genre']?.toString(),
+          dateAdded: ((r['dateAdded'] as num?) ?? 0).toInt(),
         );
       }).toList();
       return LocalAlbum(

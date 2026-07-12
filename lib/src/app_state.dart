@@ -7,6 +7,7 @@ import 'local_library.dart';
 import 'models.dart';
 import 'player_service.dart';
 import 'playlists.dart';
+import 'settings.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
 /// on purpose — screens read exactly what they need and rebuild narrowly.
@@ -19,6 +20,7 @@ class AppState extends ChangeNotifier {
   final DownloadManager downloads = DownloadManager();
   final PlaylistsService playlists = PlaylistsService();
   final HistoryService history = HistoryService();
+  final SettingsService settings = SettingsService();
 
   bool loading = false;
   String? error;
@@ -35,7 +37,10 @@ class AppState extends ChangeNotifier {
       downloads.init(),
       playlists.init(),
       history.init(),
+      settings.init(),
     ]);
+    await playerService.applySettings(settings);
+    history.listenSecondsProvider = () => settings.listenSeconds;
     await localLibrary.init();
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence();
@@ -68,6 +73,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     await loadLibrary();
     return true;
+  }
+
+  /// Forget the saved bridge and return to the connect screen.
+  Future<void> disconnect() async {
+    bridge.baseUrl = null;
+    albums = [];
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('bridgeUrl');
+    notifyListeners();
   }
 
   Future<void> loadLibrary() async {

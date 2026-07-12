@@ -4,13 +4,14 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../models.dart';
 import '../player_service.dart';
+import '../settings.dart';
 import '../theme.dart';
 import 'dialogs.dart';
 import 'widgets.dart';
 
 /// The one track row used across every list. Namida-style interactions:
-/// swipe right → play next, swipe left → add to queue (row snaps back with a
-/// snackbar), long-press → context menu, ⋮ → context menu.
+/// configurable swipe actions (defaults: right = play next, left = add to
+/// queue; row snaps back with a toast), long-press → menu, ⋮ → menu.
 class TrackTile extends StatelessWidget {
   final Track track;
   final VoidCallback onTap;
@@ -45,6 +46,8 @@ class TrackTile extends StatelessWidget {
     final s = context.read<AppState>();
     final ps = s.playerService;
     if (!swipeActions) return _tile(ps);
+    final right = s.settings.swipeRight;
+    final left = s.settings.swipeLeft;
     return Dismissible(
       key: ValueKey('tt${track.key}#$keySalt'),
       direction: DismissDirection.horizontal,
@@ -54,30 +57,52 @@ class TrackTile extends StatelessWidget {
       },
       confirmDismiss: (dir) async {
         // Perform the action but never actually dismiss — the row snaps back.
-        if (dir == DismissDirection.startToEnd) {
-          ps.playNext(track);
-          _toast(context, 'Playing next: ${track.title}');
-        } else {
-          ps.addToQueue(track);
-          _toast(context, 'Added to queue: ${track.title}');
-        }
+        _perform(context, s,
+            dir == DismissDirection.startToEnd ? right : left);
         return false;
       },
       background: Container(
         color: PA.accent.withValues(alpha: 0.25),
         alignment: Alignment.centerLeft,
         padding: const EdgeInsets.only(left: 20),
-        child: const Icon(Icons.playlist_play, color: PA.accent),
+        child: Icon(_icon(right), color: PA.accent),
       ),
       secondaryBackground: Container(
         color: PA.accent.withValues(alpha: 0.25),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
-        child: const Icon(Icons.queue, color: PA.accent),
+        child: Icon(_icon(left), color: PA.accent),
       ),
       child: _tile(ps),
     );
   }
+
+  void _perform(BuildContext context, AppState s, SwipeAction action) {
+    switch (action) {
+      case SwipeAction.playNext:
+        s.playerService.playNext(track);
+        _toast(context, 'Playing next: ${track.title}');
+      case SwipeAction.addToQueue:
+        s.playerService.addToQueue(track);
+        _toast(context, 'Added to queue: ${track.title}');
+      case SwipeAction.favorite:
+        s.playlists.toggleFavorite(track);
+        _toast(
+            context,
+            s.playlists.isFavorite(track)
+                ? 'Added to Liked Songs'
+                : 'Removed from Liked Songs');
+      case SwipeAction.openMenu:
+        showTrackMenu(context, track);
+    }
+  }
+
+  static IconData _icon(SwipeAction a) => switch (a) {
+        SwipeAction.playNext => Icons.playlist_play,
+        SwipeAction.addToQueue => Icons.queue,
+        SwipeAction.favorite => Icons.favorite,
+        SwipeAction.openMenu => Icons.more_horiz,
+      };
 
   Widget _tile(PlayerService ps) {
     return Builder(

@@ -32,13 +32,15 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Shuffle-all from library header; play & shuffle buttons on albums/artists/folders/playlists
 - [x] On-phone MediaStore library — instant index, content:// playback, album-art channel, Android 13+ permission flow
 - [x] PC bridge library — albums grid streamed lossless from the desktop bridge
-- [ ] Genres tab — group by genre tag with collage cards, counts, play/shuffle (W2)
+- [x] Genres tab — group by genre tag with counts and per-genre track lists (Android 11+ tags)
+- [ ] Genre collage artwork cards (W3)
 - [ ] Multi-select — long-press select, range select, floating panel with bulk queue/playlist/edit/delete (W2)
 - [ ] Track deletion — delete file from device with confirm; keep a recently-deleted trail (W2)
 - [ ] Grid density — per-tab column count (1–4 or auto by screen width), persisted (W2)
 - [ ] Library tabs editor — reorder/enable/disable tabs (min 2), default startup tab auto or fixed (W2)
 - [ ] Per-tab state — remembered scroll offset, per-tab filter field, re-tap active tab scrolls to top (W2)
-- [ ] Sorting depth — year, most-played, first-listen, date-modified keys; per-collection sort; ignore leading "The/A/An" (W2)
+- [x] Sorting depth — year, real date-added, most-played, first-listen sort keys
+- [ ] Sorting extras — date-modified key, per-collection sort, ignore leading "The/A/An" (W2)
 - [ ] Albums vs singles split; multi-disc albums render separated disc sections (W2)
 - [ ] Collection long-press dialogs — album/artist/genre/folder summary with play/shuffle/queue/playlist actions (W2)
 - [ ] Subpage headers — artwork, counts + duration, play/shuffle with advanced modes (random N subset, insert next/after) (W2)
@@ -46,7 +48,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [ ] Recently added page — full list by date added with age labels (W2)
 - [ ] Folder tree mode — hierarchy navigation with breadcrumb, subfolder counts, default-folder bookmark, flat toggle (W2)
 - [ ] Go-to album/artist/folder from track menu + animated jump-to-track pill; "add more from this X" (W2)
-- [ ] A–Z letter rail for instant alphabet jumps on sorted lists (W2)
+- [x] A–Z letter rail — drag or tap to jump alphabetically sorted track lists, with letter bubble
 - [ ] Track info depth — every tag field tappable-to-copy, format block, isolated preview player that pauses main playback (W2)
 - [ ] Library refresh — pull-to-refresh diff rescan, refresh-on-startup option, full re-index with live progress (W2)
 - [ ] Home tab — feed of mixes, recent/top listens, lost memories, recently added, recent queues/albums/artists (W3)
@@ -77,13 +79,15 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Shuffle toggle; repeat off / all / one cycle
 - [x] Background & lock-screen playback with media-notification artwork
 - [ ] Crossfade — configurable duration plus auto-trigger seconds before track end (W2)
-- [ ] Play/pause fade — volume ramps with independent play and pause durations (W2)
+- [x] Play/pause fade — volume ramps over a configurable duration (100–1000ms)
+- [x] Skip silence
+- [x] Pitch control — semitone display, link speed & pitch, one-tap 432Hz
+- [x] Equalizer — device bands with enable switch + loudness boost slider
+- [ ] Play/pause fade depth — independent play vs pause durations (W2)
 - [ ] Gapless playback — pre-buffer the next item for seamless transitions (W2)
-- [ ] Skip silence (W2)
-- [ ] Replay gain — normalization via loudness enhancer or volume multiplier from gain tags (W2)
-- [ ] Pitch control — semitone display, link speed & pitch, one-tap 432Hz (W2)
+- [ ] Replay gain — normalization via volume multiplier from gain tags (W2)
 - [ ] Per-track audio configs — persisted per-track speed/pitch/volume/EQ overrides with global override switch (W2)
-- [ ] Equalizer — bands, stock + user presets, loudness enhancer, expose audio session ID to external EQ apps (W2)
+- [ ] Equalizer presets (stock + user) and audio-session broadcast to external EQ apps (W3)
 - [ ] Headset buttons — single/double/triple click mapped to play-pause / next / previous (W2)
 - [ ] Interruption handling — per-event pause/duck/nothing, auto-resume threshold, pause on unplug (W2)
 - [ ] Resume on device connect — separate wired and Bluetooth thresholds (W2)
@@ -106,13 +110,15 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Play next & add to queue; drag-to-reorder; swipe-to-remove; tap-to-jump; current-track highlight; live count
 - [x] Queue survives edits — in-place just_audio operations without restarting the current track
 - [x] Queue persistence — restores queue, index, and position (paused) across app restarts
-- [ ] Insertion depth — insert after latest-inserted (chained play-next), play after N tracks, play after current group (W2)
-- [ ] Queue undo — removed items restorable via snackbar at their original index (W2)
-- [ ] Bulk removal — duplicates / all previous / all next / all except current, with removed counts (W2)
+- [x] Chained play-next — successive inserts land in A→B→C order after the current track
+- [x] Queue undo — removed items restorable via snackbar at their original index
+- [x] Bulk removal — duplicates / all previous / all next, with removed counts
+- [ ] Insertion depth — play after N tracks, play after current group, remove all-except-current (W2)
 - [ ] Saved queues page — auto-archived dated queues, replay/edit/delete, redundant-queue cleaner (W2)
 - [ ] Same-set detection — replaying an identical track set restructures in place instead of rebuilding (W2)
 - [ ] Shuffle behavior setting — shuffle whole queue vs only the items after the current one (W2)
-- [ ] Queue auto-scroll to current + jump button whose icon tracks scroll position (CD / up / down) (W2)
+- [x] Queue auto-scroll — opens at the current track, jump-to-current button
+- [ ] Jump button icon that tracks scroll position (CD / up / down) (W2)
 - [ ] Smart queue generators — more from album/artist/folder, random N, era/mood/rating/history-similarity picks (W3)
 - [ ] Mixed local + YouTube queue with per-item playback dispatch (W3)
 
@@ -163,7 +169,8 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Listen counting — 20s or half the track, skips don't count
 - [x] Day-grouped history — per-day play button, swipe-to-delete entries, debounced persistence
 - [x] Most played — ranked list with all / today / week / month / year ranges
-- [ ] Configurable listen thresholds — N seconds OR N percent, whichever comes first (W2)
+- [x] Configurable listen threshold — N seconds (capped at half the track), adjustable in settings
+- [ ] Percent-based listen threshold option (W2)
 - [ ] Custom date range for most played with calendar picker constrained to days that have history (W2)
 - [ ] Stats page — totals for tracks/albums/artists/genres, library duration, accumulated listen time (W2)
 - [ ] Undo for history deletions (W2)
@@ -267,9 +274,9 @@ Behaviors only — Papa Audio's Spotify-style visual identity is kept throughout
 
 ## Settings
 
-- [ ] Settings screen — sectioned pages for playback / library / theme / advanced (W2)
+- [x] Settings screen — playback / library / swipes / bridge sections, persisted
+- [x] Track-tile swipe action config — left/right actions selectable (play next, queue, favorite, menu)
 - [ ] FAB config — none / search / shuffle / play (W2)
-- [ ] Track-tile swipe action config — user-selectable left/right swipe actions (W2)
 - [ ] Default library tab + bottom-navigation toggle (W2)
 - [ ] Settings search with jump-and-highlight of the matched tile (W3)
 - [ ] Time & date formats — 12/24h toggle and custom date pattern (W3)

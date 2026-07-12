@@ -6,10 +6,11 @@ import '../local_library.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'playlists_ui.dart';
+import 'settings_screen.dart';
 import 'track_tile.dart';
 import 'widgets.dart';
 
-enum TrackSort { title, artist, album, dateAdded, duration }
+enum TrackSort { title, artist, album, year, dateAdded, duration, mostPlayed, firstListen }
 
 /// On-phone library, Namida-style breadth in Spotify clothes: chip tabs for
 /// Tracks / Albums / Artists / Folders / Playlists / History / Most Played,
@@ -23,7 +24,7 @@ class LibraryTab extends StatefulWidget {
 class _LibraryTabState extends State<LibraryTab>
     with SingleTickerProviderStateMixin {
   static const _tabs = [
-    'Tracks', 'Albums', 'Artists', 'Folders', 'Playlists', 'History', 'Most played'
+    'Tracks', 'Albums', 'Artists', 'Genres', 'Folders', 'Playlists', 'History', 'Most played'
   ];
   late final TabController _tc = TabController(length: _tabs.length, vsync: this);
   final _searchCtrl = TextEditingController();
@@ -94,6 +95,14 @@ class _LibraryTabState extends State<LibraryTab>
                       context.read<AppState>().playerService.playShuffled(tracks);
                     },
                   ),
+                  IconButton(
+                    tooltip: 'Settings',
+                    icon: const Icon(Icons.settings_outlined, size: 20),
+                    onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsScreen())),
+                  ),
                 ],
               ),
             ),
@@ -120,6 +129,7 @@ class _LibraryTabState extends State<LibraryTab>
                       reverse: _sortReverse),
                   _AlbumsView(lib: lib, query: _query),
                   _ArtistsView(lib: lib, query: _query),
+                  _GenresView(lib: lib, query: _query),
                   _FoldersView(lib: lib, query: _query),
                   PlaylistsView(query: _query),
                   HistoryView(query: _query),
@@ -158,8 +168,11 @@ class _LibraryTabState extends State<LibraryTab>
               (TrackSort.title, 'Title'),
               (TrackSort.artist, 'Artist'),
               (TrackSort.album, 'Album'),
+              (TrackSort.year, 'Year'),
               (TrackSort.dateAdded, 'Date added'),
               (TrackSort.duration, 'Duration'),
+              (TrackSort.mostPlayed, 'Most played'),
+              (TrackSort.firstListen, 'First listen'),
             ])
               ListTile(
                 dense: true,
@@ -201,7 +214,7 @@ bool _match(Track t, String q) =>
 
 // ── Tracks ────────────────────────────────────────────────────────────────────
 
-class _TracksView extends StatelessWidget {
+class _TracksView extends StatefulWidget {
   final LocalLibrary lib;
   final String query;
   final TrackSort sort;
@@ -213,46 +226,187 @@ class _TracksView extends StatelessWidget {
       required this.reverse});
 
   @override
+  State<_TracksView> createState() => _TracksViewState();
+}
+
+class _TracksViewState extends State<_TracksView> {
+  static const _rowHeight = 64.0;
+  final _scroll = ScrollController();
+  String? _railLetter; // letter under the finger while dragging the rail
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    var tracks = lib.albums.expand((a) => a.tracks).toList();
-    if (query.isNotEmpty) tracks = tracks.where((t) => _match(t, query)).toList();
-    tracks.sort(_comparator);
-    if (reverse) tracks = tracks.reversed.toList();
-    if (tracks.isEmpty) return const _Empty('No tracks');
     final s = context.read<AppState>();
-    return Scrollbar(
-      interactive: true,
-      thickness: 6,
-      radius: const Radius.circular(3),
-      child: ListView.builder(
-        padding: const EdgeInsets.only(bottom: 8),
-        itemCount: tracks.length + 1,
-        itemBuilder: (_, i) {
-          if (i == 0) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: Text('${tracks.length} tracks',
-                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
-            );
-          }
-          final t = tracks[i - 1];
-          return TrackTile(
-              track: t, onTap: () => s.playTrackInList(tracks, i - 1));
-        },
-      ),
+    var tracks = widget.lib.albums.expand((a) => a.tracks).toList();
+    if (widget.query.isNotEmpty) {
+      tracks = tracks.where((t) => _match(t, widget.query)).toList();
+    }
+    tracks.sort(_comparator(s));
+    if (widget.reverse) tracks = tracks.reversed.toList();
+    if (tracks.isEmpty) return const _Empty('No tracks');
+
+    final alphaSort =
+        widget.sort == TrackSort.title || widget.sort == TrackSort.artist;
+    // First row index for each letter, for the A-Z rail.
+    final letterIndex = <String, int>{};
+    if (alphaSort) {
+      for (var i = 0; i < tracks.length; i++) {
+        final field = widget.sort == TrackSort.title
+            ? tracks[i].title
+            : tracks[i].artist;
+        final l = field.isEmpty ? '#' : field[0].toUpperCase();
+        final key = RegExp(r'[A-Z]').hasMatch(l) ? l : '#';
+        letterIndex.putIfAbsent(key, () => i);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text('${tracks.length} tracks',
+              style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+        ),
+        Expanded(
+          child: Stack(
+            children: [
+              ListView.builder(
+                controller: _scroll,
+                itemExtent: _rowHeight,
+                padding: EdgeInsets.only(
+                    bottom: 8, right: alphaSort ? 22 : 0),
+                itemCount: tracks.length,
+                itemBuilder: (_, i) => TrackTile(
+                    track: tracks[i],
+                    onTap: () => s.playTrackInList(tracks, i)),
+              ),
+              if (alphaSort)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: _AlphabetRail(
+                    letters: letterIndex.keys.toList(),
+                    active: _railLetter,
+                    onLetter: (l) {
+                      final idx = letterIndex[l];
+                      if (idx == null) return;
+                      setState(() => _railLetter = l);
+                      _scroll.jumpTo((idx * _rowHeight).clamp(
+                          0.0, _scroll.position.maxScrollExtent));
+                    },
+                    onDone: () => setState(() => _railLetter = null),
+                  ),
+                ),
+              if (_railLetter != null)
+                Center(
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: PA.surfaceElevated.withValues(alpha: 0.95),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(_railLetter!,
+                        style: const TextStyle(
+                            fontSize: 34,
+                            fontWeight: FontWeight.bold,
+                            color: PA.accent)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
-  int Function(Track, Track) get _comparator => switch (sort) {
+  int Function(Track, Track) _comparator(AppState s) => switch (widget.sort) {
         TrackSort.title => (a, b) =>
             a.title.toLowerCase().compareTo(b.title.toLowerCase()),
         TrackSort.artist => (a, b) =>
             a.artist.toLowerCase().compareTo(b.artist.toLowerCase()),
         TrackSort.album => (a, b) =>
             (a.album ?? '').toLowerCase().compareTo((b.album ?? '').toLowerCase()),
-        TrackSort.dateAdded => (a, b) => b.id.compareTo(a.id),
+        TrackSort.year => (a, b) => b.year.compareTo(a.year),
+        TrackSort.dateAdded => (a, b) => b.dateAdded.compareTo(a.dateAdded),
         TrackSort.duration => (a, b) => b.duration.compareTo(a.duration),
+        TrackSort.mostPlayed => (a, b) =>
+            s.history.listensOf(b).compareTo(s.history.listensOf(a)),
+        TrackSort.firstListen => (a, b) =>
+            (s.history.firstListen[a.key] ?? 1 << 62)
+                .compareTo(s.history.firstListen[b.key] ?? 1 << 62),
       };
+}
+
+/// Compact letter strip: drag or tap to jump the list to that letter.
+class _AlphabetRail extends StatelessWidget {
+  final List<String> letters;
+  final String? active;
+  final void Function(String) onLetter;
+  final VoidCallback onDone;
+  const _AlphabetRail(
+      {required this.letters,
+      required this.active,
+      required this.onLetter,
+      required this.onDone});
+
+  static const _all = [
+    '#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final have = letters.toSet();
+    return LayoutBuilder(
+      builder: (_, c) {
+        final rowH = c.maxHeight / _all.length;
+        void hit(double dy) {
+          final i = (dy / rowH).floor().clamp(0, _all.length - 1);
+          final l = _all[i];
+          if (have.contains(l)) onLetter(l);
+        }
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragStart: (d) => hit(d.localPosition.dy),
+          onVerticalDragUpdate: (d) => hit(d.localPosition.dy),
+          onVerticalDragEnd: (_) => onDone(),
+          onTapDown: (d) => hit(d.localPosition.dy),
+          onTapUp: (_) => onDone(),
+          child: SizedBox(
+            width: 22,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (final l in _all)
+                  Text(l,
+                      style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: l == active
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: !have.contains(l)
+                              ? PA.textMuted.withValues(alpha: 0.35)
+                              : l == active
+                                  ? PA.accent
+                                  : PA.textSecondary)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 // ── Albums ────────────────────────────────────────────────────────────────────
@@ -417,6 +571,60 @@ class _ArtistsView extends StatelessWidget {
             backgroundColor: PA.card,
             child: Text(name.isEmpty ? '?' : name[0].toUpperCase(),
                 style: const TextStyle(color: PA.accent)),
+          ),
+          title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text('${tracks.length} tracks',
+              style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+          onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) =>
+                      TrackListScreen(title: name, tracks: tracks))),
+        );
+      },
+    );
+  }
+}
+
+// ── Genres ────────────────────────────────────────────────────────────────────
+
+class _GenresView extends StatelessWidget {
+  final LocalLibrary lib;
+  final String query;
+  const _GenresView({required this.lib, required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    final byGenre = <String, List<Track>>{};
+    for (final t in lib.albums.expand((a) => a.tracks)) {
+      final g = (t.genre == null || t.genre!.trim().isEmpty)
+          ? 'Unknown genre'
+          : t.genre!.trim();
+      byGenre.putIfAbsent(g, () => []).add(t);
+    }
+    var names = byGenre.keys.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    if (query.isNotEmpty) {
+      names = names.where((n) => n.toLowerCase().contains(query)).toList();
+    }
+    if (names.isEmpty) {
+      return const _Empty(
+          'No genres — genre tags need Android 11+ to be indexed');
+    }
+    return ListView.builder(
+      itemCount: names.length,
+      itemBuilder: (_, i) {
+        final name = names[i];
+        final tracks = byGenre[name]!;
+        return ListTile(
+          leading: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: PA.card,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Icon(Icons.piano, color: PA.textSecondary, size: 22),
           ),
           title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text('${tracks.length} tracks',

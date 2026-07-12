@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -316,46 +318,96 @@ void showSpeedSheet(BuildContext context, PlayerService ps) {
     builder: (sheetCtx) => SafeArea(
       child: StreamBuilder<double>(
         stream: ps.speedStream,
-        builder: (_, snap) {
-          final v = snap.data ?? ps.speed;
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text('Playback speed · ${v.toStringAsFixed(2)}x',
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
-              ),
-              SliderTheme(
-                data: SliderTheme.of(sheetCtx).copyWith(
-                  activeTrackColor: PA.accent,
-                  inactiveTrackColor: PA.card,
-                  thumbColor: Colors.white,
-                ),
-                child: Slider(
-                  value: v.clamp(0.5, 2.0),
-                  min: 0.5,
-                  max: 2.0,
-                  divisions: 30,
-                  onChanged: (nv) => ps.setSpeed(nv),
-                ),
-              ),
-              Wrap(
-                spacing: 8,
+        builder: (_, speedSnap) {
+          final v = speedSnap.data ?? ps.speed;
+          return StreamBuilder<double>(
+            stream: ps.pitchStream,
+            builder: (_, pitchSnap) {
+              final p = pitchSnap.data ?? ps.pitch;
+              // Pitch as musical semitones relative to normal (12 per octave).
+              final semis = (12 * (math.log(p) / math.log(2)));
+              return Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (final p in [0.75, 1.0, 1.25, 1.5, 2.0])
-                    ActionChip(
-                      backgroundColor: p == v ? PA.accent : PA.card,
-                      label: Text('${p}x',
-                          style: TextStyle(
-                              color: p == v ? Colors.black : PA.text)),
-                      onPressed: () => ps.setSpeed(p),
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Text('Speed · ${v.toStringAsFixed(2)}x',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                  SliderTheme(
+                    data: SliderTheme.of(sheetCtx).copyWith(
+                      activeTrackColor: PA.accent,
+                      inactiveTrackColor: PA.card,
+                      thumbColor: Colors.white,
                     ),
+                    child: Slider(
+                      value: v.clamp(0.5, 2.0),
+                      min: 0.5,
+                      max: 2.0,
+                      divisions: 30,
+                      onChanged: (nv) => ps.setSpeed(nv),
+                    ),
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final s in [0.75, 1.0, 1.25, 1.5, 2.0])
+                        ActionChip(
+                          backgroundColor: s == v ? PA.accent : PA.card,
+                          label: Text('${s}x',
+                              style: TextStyle(
+                                  color: s == v ? Colors.black : PA.text)),
+                          onPressed: () => ps.setSpeed(s),
+                        ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 16, 14, 0),
+                    child: Text(
+                        'Pitch · ${semis >= 0 ? '+' : ''}${semis.toStringAsFixed(1)} semitones',
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600)),
+                  ),
+                  SliderTheme(
+                    data: SliderTheme.of(sheetCtx).copyWith(
+                      activeTrackColor: PA.accent,
+                      inactiveTrackColor: PA.card,
+                      thumbColor: Colors.white,
+                    ),
+                    child: Slider(
+                      value: semis.clamp(-12.0, 12.0),
+                      min: -12,
+                      max: 12,
+                      divisions: 48, // quarter-semitone steps
+                      onChanged: (ns) =>
+                          ps.setPitch(math.pow(2, ns / 12).toDouble()),
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ActionChip(
+                        backgroundColor: PA.card,
+                        label: const Text('432 Hz'),
+                        tooltip: 'Tune A440 recordings down to A432',
+                        onPressed: () => ps.setPitch(432 / 440),
+                      ),
+                      const SizedBox(width: 10),
+                      TextButton(
+                        onPressed: () {
+                          ps.setSpeed(1.0);
+                          ps.setPitch(1.0);
+                        },
+                        child: const Text('Reset',
+                            style: TextStyle(color: PA.accent)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
                 ],
-              ),
-              const SizedBox(height: 18),
-            ],
+              );
+            },
           );
         },
       ),

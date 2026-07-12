@@ -13,10 +13,13 @@ class HistoryService extends ChangeNotifier {
   static const _maxEntries = 20000;
 
   /// Seconds of actual playback after which a play counts as a listen.
+  /// Overridable from settings via [listenSecondsProvider].
   static const listenAfterSeconds = 20.0;
+  int Function()? listenSecondsProvider;
 
   final List<HistoryEntry> entries = []; // newest first
   final Map<String, int> counts = {}; // track key → listens
+  final Map<String, int> firstListen = {}; // track key → epoch ms of first listen
   final Map<String, Track> _byKey = {}; // latest Track snapshot per key
 
   File? _file;
@@ -33,6 +36,8 @@ class HistoryService extends ChangeNotifier {
           entries.add(entry);
           counts.update(entry.track.key, (n) => n + 1, ifAbsent: () => 1);
           _byKey.putIfAbsent(entry.track.key, () => entry.track);
+          // Entries are newest-first, so the last write per key is the oldest.
+          firstListen[entry.track.key] = entry.at;
         }
       }
     } catch (_) {
@@ -58,9 +63,9 @@ class HistoryService extends ChangeNotifier {
     }
     if (_counted) return;
     _accrued += 1;
-    final threshold = t.duration > 0
-        ? listenAfterSeconds.clamp(0, t.duration * 0.5)
-        : listenAfterSeconds;
+    final want = (listenSecondsProvider?.call() ?? listenAfterSeconds).toDouble();
+    final threshold =
+        t.duration > 0 ? want.clamp(0, t.duration * 0.5) : want;
     if (_accrued >= threshold) {
       _counted = true;
       _record(t);
@@ -68,9 +73,11 @@ class HistoryService extends ChangeNotifier {
   }
 
   void _record(Track t) {
-    entries.insert(0, HistoryEntry(track: t, at: DateTime.now().millisecondsSinceEpoch));
+    final now = DateTime.now().millisecondsSinceEpoch;
+    entries.insert(0, HistoryEntry(track: t, at: now));
     if (entries.length > _maxEntries) entries.removeRange(_maxEntries, entries.length);
     counts.update(t.key, (n) => n + 1, ifAbsent: () => 1);
+    firstListen.putIfAbsent(t.key, () => now);
     _byKey[t.key] = t;
     _dirty = true;
     notifyListeners();
@@ -89,6 +96,7 @@ class HistoryService extends ChangeNotifier {
   Future<void> clear() async {
     entries.clear();
     counts.clear();
+    firstListen.clear();
     _byKey.clear();
     _dirty = true;
     notifyListeners();

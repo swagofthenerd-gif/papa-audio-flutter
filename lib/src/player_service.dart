@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:sqflite/sqflite.dart';
 
 import 'bridge.dart';
 import 'db.dart';
@@ -123,14 +124,21 @@ class PlayerService {
 
   // ── Queue ───────────────────────────────────────────────────────────────────
 
-  Future<void> playQueue(List<Track> tracks, int startIndex) async {
+  /// The collection (album/playlist/folder…) the current queue came from, so
+  /// its listening position can be remembered and resumed later.
+  String? currentCollectionId;
+
+  Future<void> playQueue(List<Track> tracks, int startIndex,
+      {String? collectionId, Duration? startPosition}) async {
     _queue = List.of(tracks);
+    currentCollectionId = collectionId;
     queueRevision.value++;
     _saveQueueSoon();
     onNewQueue?.call(_queue);
     await _player.setAudioSources(
       _queue.map(_sourceFor).toList(),
       initialIndex: startIndex,
+      initialPosition: startPosition,
     );
     _player.play();
   }
@@ -281,13 +289,14 @@ class PlayerService {
     await Future.delayed(const Duration(seconds: 1));
     _queueSavePending = false;
     try {
-      final snapshot = List.of(_queue);
+      // Serialize off the UI isolate — a 2000-track queue is megabytes of
+      // jsonEncode work. (Perf audit finding.)
+      final encoded = await compute(encodeTracksJson, List.of(_queue));
       await db.db.transaction((txn) async {
         await txn.delete('queue_tracks');
         final batch = txn.batch();
-        for (var i = 0; i < snapshot.length; i++) {
-          batch.insert('queue_tracks',
-              {'pos': i, 'track_json': jsonEncode(snapshot[i].toJson())});
+        for (var i = 0; i < encoded.length; i++) {
+          batch.insert('queue_tracks', {'pos': i, 'track_json': encoded[i]});
         }
         await batch.commit(noResult: true);
       });
@@ -299,9 +308,42 @@ class PlayerService {
     final db = _db;
     if (db == null) return;
     try {
-      db.setKv('queue_index', '${_player.currentIndex ?? 0}');
-      db.setKv('queue_position_ms', '${_player.position.inMilliseconds}');
+      final index = _player.currentIndex ?? 0;
+      final posMs = _player.position.inMilliseconds;
+      db.setKv('queue_index', '$index');
+      db.setKv('queue_position_ms', '$posMs');
+      final cid = currentCollectionId;
+      if (cid != null) {
+        db.db.insert(
+            'collection_resume',
+            {
+              'collection_id': cid,
+              'track_index': index,
+              'position_ms': posMs,
+              'track_title': currentTrack?.title,
+              'updated_at': DateTime.now().millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      }
     } catch (_) {}
+  }
+
+  /// Saved listening position for a collection, if any.
+  Future<ResumePoint?> resumeFor(String collectionId) async {
+    final db = _db;
+    if (db == null) return null;
+    try {
+      final rows = await db.db.query('collection_resume',
+          where: 'collection_id = ?', whereArgs: [collectionId]);
+      if (rows.isEmpty) return null;
+      return ResumePoint(
+        index: rows.first['track_index'] as int,
+        positionMs: rows.first['position_ms'] as int,
+        trackTitle: rows.first['track_title'] as String?,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   // ── Transport ───────────────────────────────────────────────────────────────
@@ -464,6 +506,18 @@ class PlayerService {
     _tick?.cancel();
     await _player.dispose();
   }
+}
+
+/// Isolate worker shared by queue persistence and the saved-queues archive.
+List<String> encodeTracksJson(List<Track> tracks) =>
+    [for (final t in tracks) jsonEncode(t.toJson())];
+
+class ResumePoint {
+  final int index;
+  final int positionMs;
+  final String? trackTitle;
+  const ResumePoint(
+      {required this.index, required this.positionMs, this.trackTitle});
 }
 
 class SleepTimerState {

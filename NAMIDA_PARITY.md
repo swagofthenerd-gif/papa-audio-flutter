@@ -102,7 +102,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Track-tap play modes — whole list / single track / gentle insert-into-queue, in settings
 - [ ] Tap-mode extras — build queue from album / artist / genre of the tapped track (W2)
 - [ ] Play-error handling — cancellable 7s auto-skip countdown; rapid-skip debounce loads only the final target (W2)
-- [ ] Per-collection resume — albums/artists/playlists/folders remember the last played item, resume FAB (W2)
+- [x] Per-collection resume — albums/artists/genres/folders/playlists remember index+position; Resume button on their screens
 - [ ] Restore last position for long tracks (configurable minimum duration) (W2)
 - [ ] Play-on-skip toggle — whether next/previous auto-plays while paused (W2)
 - [ ] Notification config — favorite and stop buttons, lockscreen-art toggle, configurable tap action (W2)
@@ -135,7 +135,8 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Full player — draggable seek bar with time labels, prev / play-pause / next, buffering spinner
 - [x] Favorite heart on both mini bar and full player
 - [x] Utility row — sleep timer, speed, more-menu
-- [ ] Waveform seekbar — real audio waveform bars, drag-to-seek with drag-up-to-cancel, seek-delta bubble (W2)
+- [x] Waveform seekbar — real PCM-decoded amplitude bars (cached in SQLite), tap/drag to scrub, slider fallback for streams
+- [ ] Waveform extras — drag-up-to-cancel, seek-delta bubble (W2)
 - [ ] Seek display options — remaining-time toggle, absolute vs +/- delta while scrubbing (W2)
 - [ ] Long-press transport — hold next for temporary speed-up, long-press previous restarts (W2)
 - [ ] Queue slide-up layer — drag past the full player to reveal the queue sheet as a third snap state (W2)

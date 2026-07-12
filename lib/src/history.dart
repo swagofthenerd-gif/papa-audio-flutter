@@ -33,32 +33,22 @@ class HistoryService extends ChangeNotifier {
   Future<void> init(AppDatabase db) async {
     _db = db;
     try {
-      // Recent window for the UI.
+      // Recent window for the UI + all-time aggregates via SQL.
       final rows = await db.db.query('history',
           orderBy: 'id DESC', limit: _memoryCap);
-      for (final r in rows) {
-        entries.add(HistoryEntry(
-          dbId: r['id'] as int,
-          track: Track.fromJson(
-              jsonDecode(r['track_json'] as String) as Map<String, dynamic>),
-          at: r['at'] as int,
-        ));
-      }
-      // All-time aggregates straight from SQL — correct even past the cap.
       final agg = await db.db.rawQuery(
           'SELECT track_key, COUNT(*) c, MIN(at) first_at FROM history GROUP BY track_key');
-      for (final r in agg) {
-        counts[r['track_key'] as String] = r['c'] as int;
-        firstListen[r['track_key'] as String] = r['first_at'] as int;
-      }
-      // Latest snapshot per key, for ranking rows not in the recent window.
       final snaps = await db.db.rawQuery(
           'SELECT h.track_key, h.track_json FROM history h '
           'INNER JOIN (SELECT track_key k, MAX(id) m FROM history GROUP BY track_key) x '
           'ON h.id = x.m');
-      for (final r in snaps) {
-        _byKey[r['track_key'] as String] = Track.fromJson(
-            jsonDecode(r['track_json'] as String) as Map<String, dynamic>);
+      // Thousands of jsonDecode+Track builds — off the UI isolate.
+      final built = await compute(_buildHistoryState, (rows, snaps));
+      entries.addAll(built.$1);
+      _byKey.addAll(built.$2);
+      for (final r in agg) {
+        counts[r['track_key'] as String] = r['c'] as int;
+        firstListen[r['track_key'] as String] = r['first_at'] as int;
       }
     } catch (_) {
       entries.clear();
@@ -180,6 +170,27 @@ class HistoryService extends ChangeNotifier {
 
   /// Writes are incremental now; kept for the app-lifecycle hook's benefit.
   Future<void> flush() async {}
+}
+
+/// Isolate worker: decode history rows + latest-snapshot rows into objects.
+(List<HistoryEntry>, Map<String, Track>) _buildHistoryState(
+    (List<Map<String, Object?>>, List<Map<String, Object?>>) input) {
+  final (rows, snaps) = input;
+  final entries = <HistoryEntry>[
+    for (final r in rows)
+      HistoryEntry(
+        dbId: r['id'] as int,
+        track: Track.fromJson(
+            jsonDecode(r['track_json'] as String) as Map<String, dynamic>),
+        at: r['at'] as int,
+      )
+  ];
+  final byKey = <String, Track>{
+    for (final r in snaps)
+      r['track_key'] as String: Track.fromJson(
+          jsonDecode(r['track_json'] as String) as Map<String, dynamic>)
+  };
+  return (entries, byKey);
 }
 
 class HistoryEntry {

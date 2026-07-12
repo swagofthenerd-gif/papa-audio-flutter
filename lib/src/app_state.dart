@@ -14,6 +14,7 @@ import 'playlists.dart';
 import 'queues_store.dart';
 import 'selection.dart';
 import 'settings.dart';
+import 'waveform.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
 /// on purpose — screens read exactly what they need and rebuild narrowly.
@@ -32,6 +33,7 @@ class AppState extends ChangeNotifier {
   late final ArtColorService artColors =
       ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));
   LyricsService? lyrics; // created once the DB is open
+  WaveformService? waveforms;
 
   // Flush pending listens the moment the app leaves the foreground, so an OS
   // process kill after hours of playback never loses history.
@@ -62,34 +64,39 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> restore() async {
-    // Local features first — they work with no bridge at all.
     playerService.history = history;
     _lifecycle ??= AppLifecycleListener(onInactive: () => history.flush());
-    final db = await AppDatabase.open();
-    lyrics = LyricsService(db);
-    await Future.wait([
-      downloads.init(),
-      playlists.init(db),
-      history.init(db),
-      settings.init(),
-      queues.init(db),
-    ]);
-    await playerService.applySettings(settings);
-    history.listenSecondsProvider = () => settings.listenSeconds;
-    playerService.onNewQueue = queues.record;
-    await localLibrary.init();
-    // Bring back last session's queue (paused) once sources are known.
-    await playerService.initPersistence(db);
+
+    // `ready` flips FIRST — the shell must appear within a frame of launch,
+    // never after the DB/migration/library chain. (Perf audit finding.)
     final prefs = await SharedPreferences.getInstance();
     localOnly = prefs.getBool('localOnly') ?? false;
     final saved = prefs.getString('bridgeUrl');
-    if (saved != null && saved.isNotEmpty) {
-      bridge.baseUrl = saved;
-      notifyListeners();
-      await loadLibrary();
-    } else if (localOnly) {
-      notifyListeners();
-    }
+    if (saved != null && saved.isNotEmpty) bridge.baseUrl = saved;
+    notifyListeners();
+
+    // Independent init chains run concurrently; join once at the end.
+    final dbFuture = AppDatabase.open();
+    final localFuture = localLibrary.init();
+    final settingsFuture =
+        settings.init().then((_) => playerService.applySettings(settings));
+    final downloadsFuture = downloads.init();
+    final db = await dbFuture;
+    lyrics = LyricsService(db);
+    waveforms = WaveformService(db);
+    await Future.wait([
+      playlists.init(db),
+      history.init(db),
+      queues.init(db),
+      localFuture,
+      settingsFuture,
+      downloadsFuture,
+    ]);
+    history.listenSecondsProvider = () => settings.listenSeconds;
+    playerService.onNewQueue = queues.record;
+    // Bring back last session's queue (paused) once sources are known.
+    await playerService.initPersistence(db);
+    if (bridge.configured) await loadLibrary();
   }
 
   Future<bool> connect(String url) async {
@@ -139,14 +146,18 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> playAlbum(Album album, {int startIndex = 0}) =>
-      playTrackInList(album.tracks, startIndex);
+      playTrackInList(album.tracks, startIndex,
+          collectionId: 'palbum:${album.id}');
 
   /// Honors the configured tap mode: replace the queue with the list, play
   /// just the tapped track, or gently slot it into the current queue.
-  Future<void> playTrackInList(List<Track> tracks, int index) {
+  /// [collectionId] lets the collection remember its listening position.
+  Future<void> playTrackInList(List<Track> tracks, int index,
+      {String? collectionId}) {
     switch (settings.tapMode) {
       case TapMode.list:
-        return playerService.playQueue(tracks, index);
+        return playerService.playQueue(tracks, index,
+            collectionId: collectionId);
       case TapMode.single:
         return playerService.playQueue([tracks[index]], 0);
       case TapMode.gentle:

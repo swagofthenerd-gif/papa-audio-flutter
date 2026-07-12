@@ -297,7 +297,9 @@ class AlbumScreen extends StatelessWidget {
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      PlayShuffleRow(tracks: album.tracks),
+                      PlayShuffleRow(
+                          tracks: album.tracks,
+                          collectionId: 'palbum:${album.id}'),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                             foregroundColor: PA.accent,

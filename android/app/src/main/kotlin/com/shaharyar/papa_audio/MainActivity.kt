@@ -5,6 +5,9 @@ import android.content.ContentUris
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,8 +18,11 @@ import android.util.Size
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
 import java.io.ByteArrayOutputStream
+import java.nio.ByteOrder
 import java.util.concurrent.Executors
+import kotlin.math.abs
 
 /**
  * MediaStore bridge for the on-phone library. Android indexes every audio file
@@ -37,6 +43,10 @@ class MainActivity : AudioServiceActivity() {
     // Two workers: a burst of artwork requests while fling-scrolling a grid
     // shouldn't queue behind one long decode.
     private val executor = Executors.newFixedThreadPool(2)
+
+    // Waveform extraction decodes whole files (seconds of work) — it gets its
+    // own single worker so it can never starve artwork loading.
+    private val waveformExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingPermissionResult: MethodChannel.Result? = null
 
@@ -78,11 +88,19 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "papa.audio/media_store")
+        // Background task queue: call handling AND reply encoding happen off
+        // the platform main thread — a full library payload or a burst of
+        // artwork byte arrays never blocks input/vsync. (Perf audit finding.)
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+        val taskQueue = messenger.makeBackgroundTaskQueue()
+        MethodChannel(messenger, "papa.audio/media_store",
+                StandardMethodCodec.INSTANCE, taskQueue)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "hasPermission" -> result.success(hasAudioPermission())
-                    "requestPermission" -> requestAudioPermission(result)
+                    // Activity.requestPermissions must run on the main thread.
+                    "requestPermission" ->
+                        mainHandler.post { requestAudioPermission(result) }
                     "queryTracks" -> runAsync(result) { queryTracks() }
                     "getArt" -> {
                         val trackId = call.argument<Number>("trackId")?.toLong() ?: 0L
@@ -90,20 +108,126 @@ class MainActivity : AudioServiceActivity() {
                         val size = call.argument<Number>("size")?.toInt() ?: 300
                         runAsync(result) { loadArt(trackId, albumId, size) }
                     }
+                    "getWaveform" -> {
+                        val uri = call.argument<String>("uri") ?: ""
+                        val buckets = call.argument<Number>("buckets")?.toInt() ?: 96
+                        runOnWaveformThread(result) { extractWaveform(uri, buckets) }
+                    }
                     else -> result.notImplemented()
                 }
             }
     }
 
-    /** MediaStore queries and bitmap decoding stay off the main thread. */
+    /** MediaStore queries and bitmap decoding stay off the main thread. With a
+     * TaskQueue channel, replies may be sent from any thread — no main-handler
+     * hop, no main-thread codec work. */
     private fun <T> runAsync(result: MethodChannel.Result, body: () -> T) {
         executor.execute {
             try {
-                val value = body()
-                mainHandler.post { result.success(value) }
+                result.success(body())
             } catch (e: Exception) {
-                mainHandler.post { result.error("media_store", e.message, null) }
+                result.error("media_store", e.message, null)
             }
+        }
+    }
+
+    private fun <T> runOnWaveformThread(result: MethodChannel.Result, body: () -> T) {
+        waveformExecutor.execute {
+            try {
+                result.success(body())
+            } catch (e: Exception) {
+                result.error("waveform", e.message, null)
+            }
+        }
+    }
+
+    // ── Waveform extraction ─────────────────────────────────────────────────
+    // Decodes the whole file to PCM once and keeps the peak amplitude per time
+    // bucket. Runs on its own worker; Dart caches the result in SQLite so each
+    // track ever pays this cost once.
+
+    private fun extractWaveform(uriStr: String, buckets: Int): List<Double>? {
+        if (uriStr.isEmpty() || buckets <= 4) return null
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        try {
+            if (uriStr.startsWith("content://")) {
+                extractor.setDataSource(this, Uri.parse(uriStr), null)
+            } else {
+                extractor.setDataSource(uriStr.removePrefix("file://"))
+            }
+            var trackIndex = -1
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    trackIndex = i
+                    format = f
+                    break
+                }
+            }
+            if (trackIndex < 0 || format == null) return null
+            val durationUs = format.getLong(MediaFormat.KEY_DURATION)
+            if (durationUs <= 0) return null
+            extractor.selectTrack(trackIndex)
+
+            codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+            codec.configure(format, null, null, 0)
+            codec.start()
+
+            val peaks = DoubleArray(buckets)
+            val info = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inIdx = codec.dequeueInputBuffer(5000)
+                    if (inIdx >= 0) {
+                        val buf = codec.getInputBuffer(inIdx)!!
+                        val n = extractor.readSampleData(buf, 0)
+                        if (n < 0) {
+                            codec.queueInputBuffer(
+                                inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            codec.queueInputBuffer(inIdx, 0, n, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val outIdx = codec.dequeueOutputBuffer(info, 5000)
+                if (outIdx >= 0) {
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        outputDone = true
+                    }
+                    val out = codec.getOutputBuffer(outIdx)
+                    if (out != null && info.size > 0) {
+                        val bucket = ((info.presentationTimeUs.toDouble() / durationUs) * buckets)
+                            .toInt().coerceIn(0, buckets - 1)
+                        // PCM16 max-abs scan, striding to cut work ~8x — peaks
+                        // survive striding well enough for a 96-bar display.
+                        val shorts = out.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                        var maxAbs = 0
+                        var i = 0
+                        while (i < shorts.limit()) {
+                            val v = abs(shorts.get(i).toInt())
+                            if (v > maxAbs) maxAbs = v
+                            i += 8
+                        }
+                        val norm = maxAbs / 32768.0
+                        if (norm > peaks[bucket]) peaks[bucket] = norm
+                    }
+                    codec.releaseOutputBuffer(outIdx, false)
+                }
+            }
+            val mx = peaks.max().coerceAtLeast(0.01)
+            return List(buckets) { (peaks[it] / mx).coerceIn(0.04, 1.0) }
+        } catch (_: Exception) {
+            return null
+        } finally {
+            try { codec?.stop() } catch (_: Exception) {}
+            try { codec?.release() } catch (_: Exception) {}
+            extractor.release()
         }
     }
 

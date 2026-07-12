@@ -18,8 +18,29 @@ import 'widgets.dart';
 /// from your PC, recent queues). Everything is built from data the app already
 /// tracks, and shelves hide themselves when empty so the page is never padded
 /// with blanks. Papa Audio's Spotify look throughout.
-class HomeTab extends StatelessWidget {
+class HomeTab extends StatefulWidget {
   const HomeTab({super.key});
+  @override
+  State<HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<HomeTab> {
+  // Derived shelves are memoized by source revisions — a listen tick or
+  // download progress event must never recompute rankings or album sorts.
+  // (Perf audit finding.)
+  List<Track> _recent = const [];
+  List<Track> _top = const [];
+  List<LocalAlbum> _recentlyAdded = const [];
+  String _sig = '';
+
+  void _recompute(AppState s) {
+    final sig = '${s.history.revision}|${s.localLibrary.revision}';
+    if (sig == _sig) return;
+    _sig = sig;
+    _recent = s.history.recentTracks(limit: 20);
+    _top = s.history.mostPlayed(limit: 20).map((e) => e.$1).toList();
+    _recentlyAdded = _recentlyAddedAlbums(s.localLibrary);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,9 +50,10 @@ class HomeTab extends StatelessWidget {
       animation: Listenable.merge(
           [s, s.history, s.localLibrary, s.playlists, s.queues]),
       builder: (context, _) {
-        final recent = s.history.recentTracks(limit: 20);
-        final top = s.history.mostPlayed(limit: 20).map((e) => e.$1).toList();
-        final recentlyAdded = _recentlyAddedAlbums(s.localLibrary);
+        _recompute(s);
+        final recent = _recent;
+        final top = _top;
+        final recentlyAdded = _recentlyAdded;
         final localAlbums = s.localLibrary.albums;
 
         return RefreshIndicator(
@@ -43,7 +65,8 @@ class HomeTab extends StatelessWidget {
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: _Header()),
-              SliverToBoxAdapter(child: _QuickPicks(state: s)),
+              SliverToBoxAdapter(
+                  child: _QuickPicks(state: s, recentlyAdded: recentlyAdded)),
               if (recent.isNotEmpty)
                 _Shelf(
                   title: 'Recently played',
@@ -95,13 +118,12 @@ class HomeTab extends StatelessWidget {
   }
 
   static List<LocalAlbum> _recentlyAddedAlbums(LocalLibrary lib) {
-    final albums = List<LocalAlbum>.of(lib.albums);
-    albums.sort((a, b) {
-      int newest(LocalAlbum al) =>
-          al.tracks.fold(0, (m, t) => t.dateAdded > m ? t.dateAdded : m);
-      return newest(b).compareTo(newest(a));
-    });
-    return albums.take(15).toList();
+    // Newest date computed once per album (not per comparison), then sorted.
+    final keyed = [
+      for (final al in lib.albums)
+        (al.tracks.fold(0, (m, t) => t.dateAdded > m ? t.dateAdded : m), al)
+    ]..sort((a, b) => b.$1.compareTo(a.$1));
+    return [for (final k in keyed.take(15)) k.$2];
   }
 
   static void _openTracks(BuildContext context, String title, List<Track> t) {
@@ -164,14 +186,15 @@ class _Header extends StatelessWidget {
 
 class _QuickPicks extends StatelessWidget {
   final AppState state;
-  const _QuickPicks({required this.state});
+  final List<LocalAlbum> recentlyAdded; // shared with HomeTab — computed once
+  const _QuickPicks({required this.state, required this.recentlyAdded});
 
   @override
   Widget build(BuildContext context) {
     final favs = state.playlists.favorites;
     final history = state.history.recentTracks(limit: 100);
     final most = state.history.mostPlayed(limit: 100).map((e) => e.$1).toList();
-    final added = HomeTab._recentlyAddedAlbums(state.localLibrary)
+    final added = recentlyAdded
         .expand((a) => a.tracks)
         .toList();
 

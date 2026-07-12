@@ -71,10 +71,12 @@ class LyricsService {
   final AppDatabase db;
   LyricsService(this.db);
 
+  /// Dedupes concurrent requests only — entries evict on completion, so
+  /// resolved lyric objects never accumulate (SQLite makes repeats cheap).
   final Map<String, Future<Lyrics?>> _inFlight = {};
 
-  Future<Lyrics?> forTrack(Track t) =>
-      _inFlight.putIfAbsent(t.key, () => _load(t));
+  Future<Lyrics?> forTrack(Track t) => _inFlight.putIfAbsent(
+      t.key, () => _load(t)..whenComplete(() => _inFlight.remove(t.key)));
 
   Future<Lyrics?> _load(Track t) async {
     try {

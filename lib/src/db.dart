@@ -18,9 +18,10 @@ class AppDatabase {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       '$dir${Platform.pathSeparator}papa_audio.db',
-      version: 2,
+      version: 3,
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createLyricsTable(db);
+        if (oldVersion < 3) await _createV3Tables(db);
       },
       onCreate: (db, _) async {
         await db.execute('CREATE TABLE history('
@@ -55,6 +56,7 @@ class AppDatabase {
             'k TEXT PRIMARY KEY,'
             'v TEXT NOT NULL)');
         await _createLyricsTable(db);
+        await _createV3Tables(db);
       },
     );
     final wrapper = AppDatabase._(db);
@@ -68,6 +70,19 @@ class AppDatabase {
       'synced TEXT NOT NULL,'
       'plain TEXT NOT NULL,'
       'fetched_at INTEGER NOT NULL)');
+
+  static Future<void> _createV3Tables(Database db) async {
+    await db.execute('CREATE TABLE IF NOT EXISTS waveforms('
+        'track_key TEXT PRIMARY KEY,'
+        'bars TEXT NOT NULL,'
+        'generated_at INTEGER NOT NULL)');
+    await db.execute('CREATE TABLE IF NOT EXISTS collection_resume('
+        'collection_id TEXT PRIMARY KEY,'
+        'track_index INTEGER NOT NULL,'
+        'position_ms INTEGER NOT NULL,'
+        'track_title TEXT,'
+        'updated_at INTEGER NOT NULL)');
+  }
 
   // ── kv helpers ──────────────────────────────────────────────────────────────
 

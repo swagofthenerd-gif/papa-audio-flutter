@@ -161,7 +161,9 @@ class PlaylistScreen extends StatelessWidget {
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: PlayShuffleRow(tracks: playlist.tracks),
+                child: PlayShuffleRow(
+                    tracks: playlist.tracks,
+                    collectionId: 'playlist:${playlist.id}'),
               ),
               Expanded(
                 child: playlist.tracks.isEmpty
@@ -200,8 +202,9 @@ class PlaylistScreen extends StatelessWidget {
                                       color: PA.textMuted, size: 18),
                                 ),
                               ),
-                              onTap: () =>
-                                  s.playTrackInList(playlist.tracks, i),
+                              onTap: () => s.playTrackInList(
+                                  playlist.tracks, i,
+                                  collectionId: 'playlist:${playlist.id}'),
                             ),
                           );
                         },
@@ -338,29 +341,50 @@ class _HistoryViewState extends State<HistoryView> {
     return _groups = groups;
   }
 
+  /// Flattened day-headers + entries so ListView.builder only constructs
+  /// visible rows — 20k history entries must not build 20k widgets.
+  /// (Perf audit finding.)
+  List<Object> _flat = const [];
+  String _flatSig = '';
+
+  List<Object> _flattened(HistoryService h, String query) {
+    final sig = '${h.revision}|$query';
+    if (sig == _flatSig) return _flat;
+    _flatSig = sig;
+    final groups = _grouped(h, query);
+    final flat = <Object>[];
+    groups.forEach((day, entries) {
+      flat.add((day, entries));
+      flat.addAll(entries);
+    });
+    return _flat = flat;
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
     return AnimatedBuilder(
       animation: s.history,
       builder: (context, _) {
-        final groups = _grouped(s.history, widget.query);
-        if (groups.isEmpty) {
+        final flat = _flattened(s.history, widget.query);
+        if (flat.isEmpty) {
           return const Center(
               child: Text('Nothing played yet',
                   style: TextStyle(color: PA.textSecondary)));
         }
-        return ListView(
+        return ListView.builder(
           padding: const EdgeInsets.only(bottom: 80),
-          children: [
-            for (final day in groups.entries) ...[
-              Padding(
+          itemCount: flat.length,
+          itemBuilder: (_, i) {
+            final item = flat[i];
+            if (item is (String, List<HistoryEntry>)) {
+              final (day, entries) = item;
+              return Padding(
                 padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
-                          '${day.key} · ${day.value.length} listens',
+                      child: Text('$day · ${entries.length} listens',
                           style: const TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
@@ -371,33 +395,32 @@ class _HistoryViewState extends State<HistoryView> {
                       icon: const Icon(Icons.play_circle_outline,
                           size: 20, color: PA.accent),
                       onPressed: () => s.playTrackInList(
-                          day.value.map((e) => e.track).toList(), 0),
+                          entries.map((e) => e.track).toList(), 0),
                     ),
                   ],
                 ),
+              );
+            }
+            final e = item as HistoryEntry;
+            return Dismissible(
+              key: ObjectKey(e),
+              direction: DismissDirection.endToStart,
+              background: Container(
+                color: PA.error,
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.only(right: 20),
+                child: const Icon(Icons.delete, color: Colors.white),
               ),
-              for (final e in day.value)
-                Dismissible(
-                  key: ObjectKey(e),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    color: PA.error,
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: 20),
-                    child: const Icon(Icons.delete, color: Colors.white),
-                  ),
-                  onDismissed: (_) => s.history.removeEntry(e),
-                  child: TrackTile(
-                    track: e.track,
-                    swipeActions: false,
-                    keySalt: e.at,
-                    subtitleOverride:
-                        '${e.track.artist} · ${_timeLabel(e.at)}',
-                    onTap: () => s.playTrackInList([e.track], 0),
-                  ),
-                ),
-            ],
-          ],
+              onDismissed: (_) => s.history.removeEntry(e),
+              child: TrackTile(
+                track: e.track,
+                swipeActions: false,
+                keySalt: e.at,
+                subtitleOverride: '${e.track.artist} · ${_timeLabel(e.at)}',
+                onTap: () => s.playTrackInList([e.track], 0),
+              ),
+            );
+          },
         );
       },
     );

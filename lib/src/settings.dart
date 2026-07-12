@@ -68,10 +68,14 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Bumped on every change — lets views memoize splitter-derived groupings.
+  int revision = 0;
+
   void update(void Function() change) {
     change();
     _artistSplitter = null; // separator/blacklist edits rebuild the splitters
     _genreSplitter = null;
+    revision++;
     notifyListeners();
     final p = _prefs;
     if (p == null) return;

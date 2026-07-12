@@ -9,6 +9,7 @@ import '../lyrics.dart';
 import '../models.dart';
 import '../player_service.dart';
 import '../theme.dart';
+import '../waveform.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
 import 'widgets.dart';
@@ -437,7 +438,7 @@ class _FullPlayer extends StatelessWidget {
             ],
           ),
           const Spacer(),
-          SeekBar(ps: ps),
+          SeekBar(ps: ps, track: track),
           TransportControls(ps: ps),
           const SizedBox(height: 6),
           // Namida-style utility row: sleep, speed, queue.
@@ -613,75 +614,191 @@ class _FavButton extends StatelessWidget {
 
 class SeekBar extends StatefulWidget {
   final PlayerService ps;
-  const SeekBar({super.key, required this.ps});
+  final Track? track; // enables the waveform when the source is on-device
+  const SeekBar({super.key, required this.ps, this.track});
   @override
   State<SeekBar> createState() => _SeekBarState();
 }
 
 class _SeekBarState extends State<SeekBar> {
   double? _dragValue; // seconds; non-null while the thumb is being dragged
+  List<double>? _bars;
+  String? _barsKey;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadBars();
+  }
+
+  @override
+  void didUpdateWidget(covariant SeekBar old) {
+    super.didUpdateWidget(old);
+    if (old.track?.key != widget.track?.key) _loadBars();
+  }
+
+  void _loadBars() {
+    final t = widget.track;
+    if (t == null || !WaveformService.eligible(t)) {
+      _bars = null;
+      _barsKey = null;
+      return;
+    }
+    if (_barsKey == t.key) return;
+    _barsKey = t.key;
+    _bars = null;
+    context.read<AppState>().waveforms?.forTrack(t).then((bars) {
+      if (mounted && _barsKey == t.key) setState(() => _bars = bars);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Boundary keeps the ~5x/s position updates repainting only the slider.
+    // Boundary keeps the ~5x/s position updates repainting only the bar.
     return RepaintBoundary(
       child: StreamBuilder<Duration?>(
-      stream: widget.ps.duration,
-      builder: (_, durSnap) {
-        final total = durSnap.data?.inMilliseconds.toDouble() ?? 0;
-        return StreamBuilder<Duration>(
-          stream: widget.ps.position,
-          builder: (_, posSnap) {
-            final pos = posSnap.data?.inMilliseconds.toDouble() ?? 0;
-            final max = total > 0 ? total : 1.0;
-            final value = (_dragValue ?? pos).clamp(0.0, max);
-            return Column(
-              children: [
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 3,
-                    thumbShape:
-                        const RoundSliderThumbShape(enabledThumbRadius: 6),
-                    overlayShape:
-                        const RoundSliderOverlayShape(overlayRadius: 14),
-                    activeTrackColor: PA.accent,
-                    inactiveTrackColor: PA.card,
-                    thumbColor: Colors.white,
+        stream: widget.ps.duration,
+        builder: (_, durSnap) {
+          final total = durSnap.data?.inMilliseconds.toDouble() ?? 0;
+          return StreamBuilder<Duration>(
+            stream: widget.ps.position,
+            builder: (_, posSnap) {
+              final pos = posSnap.data?.inMilliseconds.toDouble() ?? 0;
+              final max = total > 0 ? total : 1.0;
+              final value = (_dragValue ?? pos).clamp(0.0, max);
+              final control = _bars != null
+                  ? _WaveformBar(
+                      bars: _bars!,
+                      progress: (value / max).clamp(0.0, 1.0),
+                      enabled: total > 0,
+                      onScrub: (f) =>
+                          setState(() => _dragValue = f * max),
+                      onScrubEnd: (f) {
+                        widget.ps
+                            .seek(Duration(milliseconds: (f * max).round()));
+                        setState(() => _dragValue = null);
+                      },
+                    )
+                  : SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 3,
+                        thumbShape:
+                            const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        overlayShape:
+                            const RoundSliderOverlayShape(overlayRadius: 14),
+                        activeTrackColor: PA.accent,
+                        inactiveTrackColor: PA.card,
+                        thumbColor: Colors.white,
+                      ),
+                      child: Slider(
+                        value: value,
+                        max: max,
+                        onChanged: total > 0
+                            ? (v) => setState(() => _dragValue = v)
+                            : null,
+                        onChangeEnd: (v) {
+                          widget.ps.seek(Duration(milliseconds: v.round()));
+                          setState(() => _dragValue = null);
+                        },
+                      ),
+                    );
+              return Column(
+                children: [
+                  control,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(fmtDuration(value / 1000),
+                            style: const TextStyle(
+                                fontSize: 11, color: PA.textMuted)),
+                        Text(fmtDuration(total / 1000),
+                            style: const TextStyle(
+                                fontSize: 11, color: PA.textMuted)),
+                      ],
+                    ),
                   ),
-                  child: Slider(
-                    value: value,
-                    max: max,
-                    onChanged: total > 0
-                        ? (v) => setState(() => _dragValue = v)
-                        : null,
-                    onChangeEnd: (v) {
-                      widget.ps.seek(Duration(milliseconds: v.round()));
-                      setState(() => _dragValue = null);
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(fmtDuration(value / 1000),
-                          style:
-                              const TextStyle(fontSize: 11, color: PA.textMuted)),
-                      Text(fmtDuration(total / 1000),
-                          style:
-                              const TextStyle(fontSize: 11, color: PA.textMuted)),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+                ],
+              );
+            },
+          );
+        },
       ),
     );
   }
+}
+
+/// Namida-style waveform seekbar: amplitude bars, played portion in accent,
+/// draggable/tappable to scrub. One CustomPaint, ~96 rects — trivially cheap.
+class _WaveformBar extends StatelessWidget {
+  final List<double> bars;
+  final double progress;
+  final bool enabled;
+  final void Function(double fraction) onScrub;
+  final void Function(double fraction) onScrubEnd;
+  const _WaveformBar({
+    required this.bars,
+    required this.progress,
+    required this.enabled,
+    required this.onScrub,
+    required this.onScrubEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (_, c) {
+        double frac(Offset p) => (p.dx / c.maxWidth).clamp(0.0, 1.0);
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: enabled ? (d) => onScrubEnd(frac(d.localPosition)) : null,
+          onHorizontalDragUpdate:
+              enabled ? (d) => onScrub(frac(d.localPosition)) : null,
+          onHorizontalDragEnd: enabled
+              ? (d) => onScrubEnd(progress) // last scrubbed fraction
+              : null,
+          child: SizedBox(
+            height: 48,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _WaveformPainter(bars: bars, progress: progress),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WaveformPainter extends CustomPainter {
+  final List<double> bars;
+  final double progress;
+  _WaveformPainter({required this.bars, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final n = bars.length;
+    final slot = size.width / n;
+    final barW = slot * 0.62;
+    final mid = size.height / 2;
+    final played = Paint()..color = PA.accent;
+    final rest = Paint()..color = PA.card;
+    final cut = progress * n;
+    for (var i = 0; i < n; i++) {
+      final h = (bars[i] * (size.height - 6)).clamp(2.0, size.height - 6);
+      final x = i * slot + (slot - barW) / 2;
+      final r = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, mid - h / 2, barW, h),
+        const Radius.circular(2),
+      );
+      canvas.drawRRect(r, i < cut ? played : rest);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WaveformPainter old) =>
+      old.progress != progress || !identical(old.bars, bars);
 }
 
 class TransportControls extends StatelessWidget {

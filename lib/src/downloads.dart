@@ -14,6 +14,7 @@ import 'models.dart';
 /// download is running.
 class DownloadManager extends ChangeNotifier {
   Directory? _dir;
+  int _lastProgressNotify = 0;
   final Map<String, double> progress = {}; // track id → 0..1 (in flight)
   final Map<String, String> failed = {}; // track id → error message
   List<Track> downloaded = []; // playable file:// tracks
@@ -71,9 +72,12 @@ class DownloadManager extends ChangeNotifier {
           received += chunk.length;
           if (total > 0) {
             final p = received / total;
-            // Throttle notifications to whole-percent steps.
-            if ((p * 100).floor() > ((progress[t.id] ?? 0) * 100).floor()) {
-              progress[t.id] = p;
+            progress[t.id] = p;
+            // Time-throttled: at most ~4 rebuilds/second regardless of
+            // network speed. (Perf audit finding.)
+            final now = DateTime.now().millisecondsSinceEpoch;
+            if (now - _lastProgressNotify >= 250) {
+              _lastProgressNotify = now;
               notifyListeners();
             }
           }

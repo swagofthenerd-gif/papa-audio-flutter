@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../local_library.dart';
 import '../models.dart';
+import '../player_service.dart';
 import '../text_norm.dart';
 import '../theme.dart';
 import 'playlists_ui.dart';
@@ -281,7 +282,23 @@ class _TracksViewState extends State<_TracksView>
       tracks =
           tracks.where((t) => widget.lib.matchesNorm(t, widget.query)).toList();
     }
-    tracks.sort(_comparator(s));
+    // Decorate-sort-undecorate for string sorts: lowercase once per track,
+    // not twice per comparison. (Perf audit finding.)
+    switch (widget.sort) {
+      case TrackSort.title:
+      case TrackSort.artist:
+      case TrackSort.album:
+        String keyOf(Track t) => switch (widget.sort) {
+              TrackSort.title => t.title.toLowerCase(),
+              TrackSort.artist => t.artist.toLowerCase(),
+              _ => (t.album ?? '').toLowerCase(),
+            };
+        final keyed = [for (final t in tracks) (keyOf(t), t)]
+          ..sort((a, b) => a.$1.compareTo(b.$1));
+        tracks = [for (final k in keyed) k.$2];
+      default:
+        tracks.sort(_comparator(s));
+    }
     if (widget.reverse) tracks = tracks.reversed.toList();
     _tracks = tracks;
 
@@ -560,7 +577,9 @@ class LocalAlbumScreen extends StatelessWidget {
                   Text(album.artist,
                       style: const TextStyle(color: PA.textSecondary)),
                   const SizedBox(height: 12),
-                  PlayShuffleRow(tracks: album.tracks),
+                  PlayShuffleRow(
+                      tracks: album.tracks,
+                      collectionId: 'lalbum:${album.albumId}'),
                 ],
               ),
             ),
@@ -577,7 +596,8 @@ class LocalAlbumScreen extends StatelessWidget {
                     child: Center(
                         child: Text('${i + 1}',
                             style: const TextStyle(color: PA.textMuted)))),
-                onTap: () => s.playTrackInList(album.tracks, i),
+                onTap: () => s.playTrackInList(album.tracks, i,
+                    collectionId: 'lalbum:${album.albumId}'),
               );
             },
           ),
@@ -590,27 +610,76 @@ class LocalAlbumScreen extends StatelessWidget {
 
 // ── Artists ───────────────────────────────────────────────────────────────────
 
-class _ArtistsView extends StatelessWidget {
+/// Shared memoization for the grouped views: the (expensive) full-library
+/// regroup runs only when the library, splitter settings, or query change —
+/// never on incidental rebuilds. (Perf audit finding.)
+class _GroupCache {
+  Map<String, List<Track>> groups = const {};
+  List<String> allNames = const [];
+  List<String> names = const [];
+  String _groupSig = '';
+  String _fullSig = '';
+
+  List<String> update({
+    required String groupSig,
+    required String query,
+    required Map<String, List<Track>> Function() regroup,
+  }) {
+    if (groupSig != _groupSig) {
+      _groupSig = groupSig;
+      groups = regroup();
+      // Decorate-sort-undecorate: normText once per name, not per comparison.
+      final keyed = [for (final n in groups.keys) (normText(n), n)]
+        ..sort((a, b) => a.$1.compareTo(b.$1));
+      allNames = [for (final k in keyed) k.$2];
+      _fullSig = ''; // force query refilter
+    }
+    final fullSig = '$groupSig|$query';
+    if (fullSig != _fullSig) {
+      _fullSig = fullSig;
+      names = query.isEmpty
+          ? allNames
+          : [
+              for (final n in allNames)
+                if (blobMatches(normText(n), query)) n
+            ];
+    }
+    return names;
+  }
+}
+
+class _ArtistsView extends StatefulWidget {
   final LocalLibrary lib;
   final String query;
   const _ArtistsView({required this.lib, required this.query});
+  @override
+  State<_ArtistsView> createState() => _ArtistsViewState();
+}
+
+class _ArtistsViewState extends State<_ArtistsView> {
+  final _cache = _GroupCache();
 
   @override
   Widget build(BuildContext context) {
-    // "A; B feat. C" credits every artist — separators + never-split blacklist
-    // are configurable in settings.
-    final splitter = context.read<AppState>().settings.artistSplitter;
-    final byArtist = <String, List<Track>>{};
-    for (final t in lib.albums.expand((a) => a.tracks)) {
-      for (final artist in splitter.split(t.artist)) {
-        byArtist.putIfAbsent(artist, () => []).add(t);
-      }
-    }
-    var names = byArtist.keys.toList()
-      ..sort((a, b) => normText(a).compareTo(normText(b)));
-    if (query.isNotEmpty) {
-      names = names.where((n) => blobMatches(normText(n), query)).toList();
-    }
+    final settings = context.read<AppState>().settings;
+    final lib = widget.lib;
+    final names = _cache.update(
+      groupSig: 'a${lib.revision}|${settings.revision}',
+      query: widget.query,
+      regroup: () {
+        // "A; B feat. C" credits every artist — separators + blacklist are
+        // configurable in settings.
+        final splitter = settings.artistSplitter;
+        final byArtist = <String, List<Track>>{};
+        for (final t in lib.albums.expand((a) => a.tracks)) {
+          for (final artist in splitter.split(t.artist)) {
+            byArtist.putIfAbsent(artist, () => []).add(t);
+          }
+        }
+        return byArtist;
+      },
+    );
+    final byArtist = _cache.groups;
     if (names.isEmpty) return const _Empty('No artists');
     return ListView.builder(
       itemCount: names.length,
@@ -629,8 +698,10 @@ class _ArtistsView extends StatelessWidget {
           onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
-                  builder: (_) =>
-                      TrackListScreen(title: name, tracks: tracks))),
+                  builder: (_) => TrackListScreen(
+                      title: name,
+                      tracks: tracks,
+                      collectionId: 'artist:$name'))),
         );
       },
     );
@@ -639,27 +710,39 @@ class _ArtistsView extends StatelessWidget {
 
 // ── Genres ────────────────────────────────────────────────────────────────────
 
-class _GenresView extends StatelessWidget {
+class _GenresView extends StatefulWidget {
   final LocalLibrary lib;
   final String query;
   const _GenresView({required this.lib, required this.query});
+  @override
+  State<_GenresView> createState() => _GenresViewState();
+}
+
+class _GenresViewState extends State<_GenresView> {
+  final _cache = _GroupCache();
 
   @override
   Widget build(BuildContext context) {
-    final splitter = context.read<AppState>().settings.genreSplitter;
-    final byGenre = <String, List<Track>>{};
-    for (final t in lib.albums.expand((a) => a.tracks)) {
-      final raw = t.genre?.trim() ?? '';
-      final genres = raw.isEmpty ? const ['Unknown genre'] : splitter.split(raw);
-      for (final g in genres) {
-        byGenre.putIfAbsent(g, () => []).add(t);
-      }
-    }
-    var names = byGenre.keys.toList()
-      ..sort((a, b) => normText(a).compareTo(normText(b)));
-    if (query.isNotEmpty) {
-      names = names.where((n) => blobMatches(normText(n), query)).toList();
-    }
+    final settings = context.read<AppState>().settings;
+    final lib = widget.lib;
+    final names = _cache.update(
+      groupSig: 'g${lib.revision}|${settings.revision}',
+      query: widget.query,
+      regroup: () {
+        final splitter = settings.genreSplitter;
+        final byGenre = <String, List<Track>>{};
+        for (final t in lib.albums.expand((a) => a.tracks)) {
+          final raw = t.genre?.trim() ?? '';
+          final genres =
+              raw.isEmpty ? const ['Unknown genre'] : splitter.split(raw);
+          for (final g in genres) {
+            byGenre.putIfAbsent(g, () => []).add(t);
+          }
+        }
+        return byGenre;
+      },
+    );
+    final byGenre = _cache.groups;
     if (names.isEmpty) {
       return const _Empty(
           'No genres — genre tags need Android 11+ to be indexed');
@@ -685,8 +768,10 @@ class _GenresView extends StatelessWidget {
           onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
-                  builder: (_) =>
-                      TrackListScreen(title: name, tracks: tracks))),
+                  builder: (_) => TrackListScreen(
+                      title: name,
+                      tracks: tracks,
+                      collectionId: 'genre:$name'))),
         );
       },
     );
@@ -695,25 +780,54 @@ class _GenresView extends StatelessWidget {
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 
-class _FoldersView extends StatelessWidget {
+class _FoldersView extends StatefulWidget {
   final LocalLibrary lib;
   final String query;
   const _FoldersView({required this.lib, required this.query});
+  @override
+  State<_FoldersView> createState() => _FoldersViewState();
+}
+
+class _FoldersViewState extends State<_FoldersView> {
+  Map<String, List<Track>> _byFolder = const {};
+  List<String> _allDirs = const [];
+  List<String> _dirs = const [];
+  String _sig = '';
+  String _fullSig = '';
+
+  void _recompute(LocalLibrary lib, String query) {
+    final sig = 'f${lib.revision}';
+    if (sig != _sig) {
+      _sig = sig;
+      final byFolder = <String, List<Track>>{};
+      for (final t in lib.albums.expand((a) => a.tracks)) {
+        if (t.filePath.isEmpty) continue;
+        final sep = t.filePath.contains('/') ? '/' : r'\';
+        final idx = t.filePath.lastIndexOf(sep);
+        final dir = idx > 0 ? t.filePath.substring(0, idx) : t.filePath;
+        byFolder.putIfAbsent(dir, () => []).add(t);
+      }
+      _byFolder = byFolder;
+      _allDirs = byFolder.keys.toList()..sort(_numericAwareCompare);
+      _fullSig = '';
+    }
+    final fullSig = '$sig|$query';
+    if (fullSig != _fullSig) {
+      _fullSig = fullSig;
+      _dirs = query.isEmpty
+          ? _allDirs
+          : [
+              for (final d in _allDirs)
+                if (blobMatches(normText(d), query)) d
+            ];
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final byFolder = <String, List<Track>>{};
-    for (final t in lib.albums.expand((a) => a.tracks)) {
-      if (t.filePath.isEmpty) continue;
-      final sep = t.filePath.contains('/') ? '/' : r'\';
-      final idx = t.filePath.lastIndexOf(sep);
-      final dir = idx > 0 ? t.filePath.substring(0, idx) : t.filePath;
-      byFolder.putIfAbsent(dir, () => []).add(t);
-    }
-    var dirs = byFolder.keys.toList()..sort(_numericAwareCompare);
-    if (query.isNotEmpty) {
-      dirs = dirs.where((d) => blobMatches(normText(d), query)).toList();
-    }
+    _recompute(widget.lib, widget.query);
+    final byFolder = _byFolder;
+    final dirs = _dirs;
     if (dirs.isEmpty) return const _Empty('No folders');
     return ListView.builder(
       itemCount: dirs.length,
@@ -731,16 +845,19 @@ class _FoldersView extends StatelessWidget {
           onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
-                  builder: (_) =>
-                      TrackListScreen(title: name, tracks: tracks))),
+                  builder: (_) => TrackListScreen(
+                      title: name,
+                      tracks: tracks,
+                      collectionId: 'folder:$dir'))),
         );
       },
     );
   }
 
   /// "Music 2" sorts before "Music 12" — compares digit runs numerically.
+  static final _numRunRe = RegExp(r'(\d+)|(\D+)'); // hoisted: not per-compare
   static int _numericAwareCompare(String a, String b) {
-    final ra = RegExp(r'(\d+)|(\D+)');
+    final ra = _numRunRe;
     final pa = ra.allMatches(a.toLowerCase()).map((m) => m.group(0)!).toList();
     final pb = ra.allMatches(b.toLowerCase()).map((m) => m.group(0)!).toList();
     for (var i = 0; i < pa.length && i < pb.length; i++) {
@@ -761,7 +878,9 @@ class _FoldersView extends StatelessWidget {
 class TrackListScreen extends StatelessWidget {
   final String title;
   final List<Track> tracks;
-  const TrackListScreen({super.key, required this.title, required this.tracks});
+  final String? collectionId; // enables per-collection resume
+  const TrackListScreen(
+      {super.key, required this.title, required this.tracks, this.collectionId});
 
   @override
   Widget build(BuildContext context) {
@@ -777,7 +896,7 @@ class TrackListScreen extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: PlayShuffleRow(tracks: tracks),
+            child: PlayShuffleRow(tracks: tracks, collectionId: collectionId),
           ),
           Expanded(
             child: ListView.builder(
@@ -785,7 +904,8 @@ class TrackListScreen extends StatelessWidget {
               itemCount: tracks.length,
               itemBuilder: (_, i) => TrackTile(
                   track: tracks[i],
-                  onTap: () => s.playTrackInList(tracks, i)),
+                  onTap: () => s.playTrackInList(tracks, i,
+                      collectionId: collectionId)),
             ),
           ),
         ],
@@ -796,23 +916,30 @@ class TrackListScreen extends StatelessWidget {
 
 class PlayShuffleRow extends StatelessWidget {
   final List<Track> tracks;
-  const PlayShuffleRow({super.key, required this.tracks});
+
+  /// When set, the collection remembers its listening position and offers a
+  /// Resume button here.
+  final String? collectionId;
+  const PlayShuffleRow({super.key, required this.tracks, this.collectionId});
+
   @override
   Widget build(BuildContext context) {
     final ps = context.read<AppState>().playerService;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    return Wrap(
+      spacing: 10,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         FilledButton.icon(
           style: FilledButton.styleFrom(backgroundColor: PA.accent),
-          onPressed:
-              tracks.isEmpty ? null : () => ps.playQueue(tracks, 0),
+          onPressed: tracks.isEmpty
+              ? null
+              : () => ps.playQueue(tracks, 0, collectionId: collectionId),
           icon: const Icon(Icons.play_arrow, color: Colors.black),
           label: const Text('Play',
               style:
                   TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         ),
-        const SizedBox(width: 10),
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
               foregroundColor: PA.accent,
@@ -821,6 +948,33 @@ class PlayShuffleRow extends StatelessWidget {
           icon: const Icon(Icons.shuffle, size: 18),
           label: const Text('Shuffle'),
         ),
+        if (collectionId != null && tracks.isNotEmpty)
+          FutureBuilder<ResumePoint?>(
+            future: ps.resumeFor(collectionId!),
+            builder: (_, snap) {
+              final r = snap.data;
+              if (r == null ||
+                  r.index < 0 ||
+                  r.index >= tracks.length ||
+                  (r.index == 0 && r.positionMs < 15000)) {
+                return const SizedBox.shrink();
+              }
+              return OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: PA.textSecondary,
+                    side: const BorderSide(color: PA.separator)),
+                onPressed: () => ps.playQueue(tracks, r.index,
+                    collectionId: collectionId,
+                    startPosition: Duration(milliseconds: r.positionMs)),
+                icon: const Icon(Icons.history, size: 16),
+                label: Text(
+                    'Resume ${r.trackTitle ?? 'track ${r.index + 1}'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12)),
+              );
+            },
+          ),
       ],
     );
   }

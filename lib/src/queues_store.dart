@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
 import 'models.dart';
+import 'player_service.dart' show encodeTracksJson;
 
 /// Auto-archive of played queues, backed by SQLite: every new queue is
 /// snapshotted with its timestamp so any listening session can be replayed
@@ -35,11 +36,20 @@ class QueuesStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Cheap order-sensitive signature — no giant string concatenations.
+  static String sigOf(List<Track> tracks) {
+    var h = 0;
+    for (final t in tracks) {
+      h = 0x1fffffff & (h * 31 + t.key.hashCode);
+    }
+    return 'h$h:${tracks.length}';
+  }
+
   /// Called by the player whenever a NEW queue starts. Replaying the same set
   /// of tracks refreshes the existing snapshot instead of duplicating it.
   void record(List<Track> tracks) {
     if (tracks.isEmpty) return;
-    final sig = tracks.map((t) => t.key).join('');
+    final sig = sigOf(tracks);
     final now = DateTime.now().millisecondsSinceEpoch;
     final existing = saved.indexWhere((q) => q.sig == sig);
     SavedQueue snapshot;
@@ -56,6 +66,8 @@ class QueuesStore extends ChangeNotifier {
 
   Future<void> _persist(SavedQueue q, String sig) async {
     try {
+      // Encode off the UI isolate; join the pre-encoded rows cheaply.
+      final encoded = await compute(encodeTracksJson, q.tracks);
       await _db?.db.transaction((txn) async {
         await txn.delete('saved_queues', where: 'sig = ?', whereArgs: [sig]);
         await txn.insert(
@@ -63,8 +75,7 @@ class QueuesStore extends ChangeNotifier {
             {
               'at': q.at,
               'sig': sig,
-              'tracks_json':
-                  jsonEncode(q.tracks.map((t) => t.toJson()).toList()),
+              'tracks_json': '[${encoded.join(',')}]',
             },
             conflictAlgorithm: ConflictAlgorithm.replace);
         await txn.rawDelete(
@@ -88,7 +99,7 @@ class QueuesStore extends ChangeNotifier {
 class SavedQueue {
   final int at; // epoch ms
   final List<Track> tracks;
-  late final String sig = tracks.map((t) => t.key).join('');
+  late final String sig = QueuesStore.sigOf(tracks);
 
   SavedQueue({required this.at, required this.tracks});
 }

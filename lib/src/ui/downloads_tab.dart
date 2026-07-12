@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
+import '../models.dart';
 import '../theme.dart';
 import 'widgets.dart';
 
@@ -20,41 +21,59 @@ class _DownloadsTabState extends State<DownloadsTab> {
   Timer? _poll;
   List<dynamic> _transfers = [];
   ValueListenable<TickerModeData>? _visible; // TickerMode notifier from the shell
+  AppLifecycleListener? _lifecycle;
 
   @override
   void initState() {
     super.initState();
-    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _refreshTransfers());
+    // Timer exists ONLY while the tab is visible and the app is foregrounded —
+    // no wakeups with the screen off. (Perf audit finding.)
+    _lifecycle = AppLifecycleListener(
+      onResume: _syncPolling,
+      onInactive: _stopPolling,
+    );
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _visible?.removeListener(_onVisibility);
-    _visible = TickerMode.getValuesNotifier(context)..addListener(_onVisibility);
-    if (_visible!.value.enabled) _refreshTransfers();
+    _visible?.removeListener(_syncPolling);
+    _visible = TickerMode.getValuesNotifier(context)..addListener(_syncPolling);
+    _syncPolling();
   }
 
-  void _onVisibility() {
-    // Refresh immediately when the tab comes back into view.
-    if (_visible?.value.enabled ?? false) _refreshTransfers();
+  void _syncPolling() {
+    final shouldRun = _visible?.value.enabled ?? false;
+    if (shouldRun && _poll == null) {
+      _refreshTransfers();
+      _poll = Timer.periodic(
+          const Duration(seconds: 3), (_) => _refreshTransfers());
+    } else if (!shouldRun) {
+      _stopPolling();
+    }
+  }
+
+  void _stopPolling() {
+    _poll?.cancel();
+    _poll = null;
   }
 
   @override
   void dispose() {
-    _visible?.removeListener(_onVisibility);
-    _poll?.cancel();
+    _visible?.removeListener(_syncPolling);
+    _lifecycle?.dispose();
+    _stopPolling();
     super.dispose();
   }
 
   Future<void> _refreshTransfers() async {
-    // Never poll the PC while this tab is hidden — hours of background use
-    // must not generate a request every 3 seconds.
-    if (!(_visible?.value.enabled ?? true)) return;
     final s = context.read<AppState>();
     if (!s.configured) return;
     final t = await s.bridge.slskTransfers();
-    if (mounted) setState(() => _transfers = t);
+    if (!mounted) return;
+    // Skip the rebuild when nothing changed — polling mustn't cost frames.
+    if (t.length == _transfers.length && '$t' == '$_transfers') return;
+    setState(() => _transfers = t);
   }
 
   @override
@@ -64,73 +83,84 @@ class _DownloadsTabState extends State<DownloadsTab> {
     return AnimatedBuilder(
       animation: dm,
       builder: (context, _) {
+        // Flattened, LAZY list: only visible rows are ever built, so progress
+        // notifies never rebuild hundreds of tiles. (Perf audit finding.)
         final inFlight = dm.progress.entries.toList();
-        return ListView(
+        final transfers = _transfers.whereType<Map>().toList();
+        final items = <Object>[
+          const _SectionHeader('On this phone'),
+          if (dm.downloaded.isEmpty && inFlight.isEmpty) const _EmptyNote(
+              'Nothing downloaded yet. Use the download button on any '
+              'album or track in Home to keep music for offline.'),
+          ...inFlight,
+          ...dm.downloaded,
+          const _SectionHeader('PC transfers (Soulseek)'),
+          if (!s.configured)
+            const _EmptyNote('Connect to your PC to see transfers.')
+          else if (transfers.isEmpty)
+            const _EmptyNote('No active transfers.'),
+          ...transfers,
+        ];
+        return ListView.builder(
           padding: const EdgeInsets.only(bottom: 80),
-          children: [
-            const _SectionHeader('On this phone'),
-            if (dm.downloaded.isEmpty && inFlight.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Text(
-                    'Nothing downloaded yet. Use the download button on any '
-                    'album or track in Home to keep music for offline.',
-                    style: TextStyle(color: PA.textSecondary, fontSize: 13)),
-              ),
-            ...inFlight.map((e) => ListTile(
-                  leading: const SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Center(
-                          child: SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: PA.accent)))),
-                  title: Text(e.key.split(RegExp(r'[\\/]')).last,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: LinearProgressIndicator(
-                      value: e.value > 0 ? e.value : null,
-                      color: PA.accent,
-                      backgroundColor: PA.card),
-                )),
-            ...dm.downloaded.asMap().entries.map((e) {
-              final t = e.value;
+          itemCount: items.length,
+          itemBuilder: (_, i) {
+            final item = items[i];
+            if (item is Widget) return item;
+            if (item is MapEntry<String, double>) {
+              return ListTile(
+                leading: const SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Center(
+                        child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: PA.accent)))),
+                title: Text(item.key.split(RegExp(r'[\\/]')).last,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: LinearProgressIndicator(
+                    value: item.value > 0 ? item.value : null,
+                    color: PA.accent,
+                    backgroundColor: PA.card),
+              );
+            }
+            if (item is Track) {
               return ListTile(
                 leading: TrackArt(
-                    artUri: t.artUri, artPath: t.artPath, size: 40, px: 120),
-                title: Text(t.title,
+                    artUri: item.artUri, artPath: item.artPath, size: 40, px: 120),
+                title: Text(item.title,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(t.artist,
+                subtitle: Text(item.artist,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: PA.textSecondary)),
-                onTap: () => s.playTrackInList(dm.downloaded, e.key),
+                onTap: () => s.playTrackInList(
+                    dm.downloaded, dm.downloaded.indexOf(item)),
                 trailing: IconButton(
                   icon: const Icon(Icons.delete_outline, color: PA.textMuted),
-                  onPressed: () => dm.remove(t.id),
+                  onPressed: () => dm.remove(item.id),
                 ),
               );
-            }),
-            const _SectionHeader('PC transfers (Soulseek)'),
-            if (!s.configured)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Text('Connect to your PC to see transfers.',
-                    style: TextStyle(color: PA.textSecondary, fontSize: 13)),
-              )
-            else if (_transfers.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Text('No active transfers.',
-                    style: TextStyle(color: PA.textSecondary, fontSize: 13)),
-              ),
-            ..._transfers.whereType<Map>().map((t) => _TransferTile(t: t)),
-          ],
+            }
+            return _TransferTile(t: item as Map);
+          },
         );
       },
     );
   }
+}
+
+class _EmptyNote extends StatelessWidget {
+  final String text;
+  const _EmptyNote(this.text);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Text(text,
+            style: const TextStyle(color: PA.textSecondary, fontSize: 13)),
+      );
 }
 
 class _SectionHeader extends StatelessWidget {

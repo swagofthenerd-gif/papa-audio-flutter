@@ -8,6 +8,8 @@ import 'local_library.dart';
 import 'models.dart';
 import 'player_service.dart';
 import 'playlists.dart';
+import 'queues_store.dart';
+import 'selection.dart';
 import 'settings.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
@@ -22,6 +24,8 @@ class AppState extends ChangeNotifier {
   final PlaylistsService playlists = PlaylistsService();
   final HistoryService history = HistoryService();
   final SettingsService settings = SettingsService();
+  final QueuesStore queues = QueuesStore();
+  final TrackSelection selection = TrackSelection();
 
   // Flush pending listens the moment the app leaves the foreground, so an OS
   // process kill after hours of playback never loses history.
@@ -44,9 +48,11 @@ class AppState extends ChangeNotifier {
       playlists.init(),
       history.init(),
       settings.init(),
+      queues.init(),
     ]);
     await playerService.applySettings(settings);
     history.listenSecondsProvider = () => settings.listenSeconds;
+    playerService.onNewQueue = queues.record;
     await localLibrary.init();
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence();
@@ -106,10 +112,25 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> playAlbum(Album album, {int startIndex = 0}) =>
-      playerService.playQueue(album.tracks, startIndex);
+      playTrackInList(album.tracks, startIndex);
 
-  Future<void> playTrackInList(List<Track> tracks, int index) =>
-      playerService.playQueue(tracks, index);
+  /// Honors the configured tap mode: replace the queue with the list, play
+  /// just the tapped track, or gently slot it into the current queue.
+  Future<void> playTrackInList(List<Track> tracks, int index) {
+    switch (settings.tapMode) {
+      case TapMode.list:
+        return playerService.playQueue(tracks, index);
+      case TapMode.single:
+        return playerService.playQueue([tracks[index]], 0);
+      case TapMode.gentle:
+        if (playerService.queue.isEmpty) {
+          return playerService.playQueue([tracks[index]], 0);
+        }
+        return playerService
+            .playNext(tracks[index])
+            .then((_) => playerService.next());
+    }
+  }
 
   /// Play a single YouTube result, streamed through the bridge.
   Future<void> playYt(YtResult v) {

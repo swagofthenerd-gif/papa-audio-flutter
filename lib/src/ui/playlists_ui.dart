@@ -8,6 +8,7 @@ import '../playlists.dart';
 import '../theme.dart';
 import 'dialogs.dart';
 import 'library_tab.dart';
+import 'selection_bar.dart';
 import 'track_tile.dart';
 import 'widgets.dart';
 
@@ -129,6 +130,7 @@ class PlaylistScreen extends StatelessWidget {
           return const Scaffold(body: SizedBox.shrink());
         }
         return Scaffold(
+          bottomNavigationBar: const SelectionBar(),
           appBar: AppBar(
             backgroundColor: PA.background,
             title: Text(playlist.name, style: const TextStyle(fontSize: 17)),
@@ -210,6 +212,95 @@ class PlaylistScreen extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+// ── Saved queues ──────────────────────────────────────────────────────────────
+
+class QueuesView extends StatelessWidget {
+  final String query;
+  const QueuesView({super.key, required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.read<AppState>();
+    return AnimatedBuilder(
+      animation: s.queues,
+      builder: (context, _) {
+        var queues = s.queues.saved;
+        if (query.isNotEmpty) {
+          queues = queues
+              .where((q) => q.tracks.any((t) =>
+                  t.title.toLowerCase().contains(query) ||
+                  t.artist.toLowerCase().contains(query)))
+              .toList();
+        }
+        if (queues.isEmpty) {
+          return const Center(
+              child: Text('Queues you play are archived here',
+                  style: TextStyle(color: PA.textSecondary)));
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.only(bottom: 80),
+          itemCount: queues.length,
+          itemBuilder: (_, i) {
+            final q = queues[i];
+            final first = q.tracks.first;
+            return Dismissible(
+              key: ValueKey('sq${q.at}'),
+              direction: DismissDirection.endToStart,
+              background: Container(
+                color: PA.error,
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.only(right: 20),
+                child: const Icon(Icons.delete, color: Colors.white),
+              ),
+              onDismissed: (_) => s.queues.delete(q),
+              child: ListTile(
+                leading: TrackArt(
+                    artUri: first.artUri,
+                    artPath: first.artPath,
+                    size: 44,
+                    px: 120),
+                title: Text(_when(q.at),
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                    '${q.tracks.length} tracks · ${first.title}'
+                    '${q.tracks.length > 1 ? ', …' : ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(color: PA.textSecondary, fontSize: 12)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.play_circle_outline,
+                      color: PA.accent, size: 22),
+                  onPressed: () => s.playerService.playQueue(q.tracks, 0),
+                ),
+                onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => TrackListScreen(
+                            title: _when(q.at), tracks: q.tracks))),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  static String _when(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final that = DateTime(d.year, d.month, d.day);
+    final h = d.hour.toString().padLeft(2, '0');
+    final m = d.minute.toString().padLeft(2, '0');
+    final diff = today.difference(that).inDays;
+    if (diff == 0) return 'Today $h:$m';
+    if (diff == 1) return 'Yesterday $h:$m';
+    return '${that.day}/${that.month}/${that.year} $h:$m';
   }
 }
 

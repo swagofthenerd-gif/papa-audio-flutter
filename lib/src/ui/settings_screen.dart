@@ -72,6 +72,24 @@ class SettingsScreen extends StatelessWidget {
                 s.playerService.setSkipSilence(v);
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.touch_app_outlined,
+                  color: PA.textSecondary),
+              title: const Text('Tapping a track'),
+              trailing: DropdownButton<TapMode>(
+                value: st.tapMode,
+                dropdownColor: PA.surfaceElevated,
+                underline: const SizedBox.shrink(),
+                style: const TextStyle(fontSize: 12, color: PA.text),
+                items: [
+                  for (final m in TapMode.values)
+                    DropdownMenuItem(value: m, child: Text(m.label)),
+                ],
+                onChanged: (m) {
+                  if (m != null) st.update(() => st.tapMode = m);
+                },
+              ),
+            ),
             SwitchListTile(
               activeThumbColor: PA.accent,
               secondary: const Icon(Icons.link, color: PA.textSecondary),

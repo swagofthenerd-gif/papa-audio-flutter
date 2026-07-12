@@ -8,6 +8,7 @@ import '../local_library.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'playlists_ui.dart';
+import 'selection_bar.dart';
 import 'settings_screen.dart';
 import 'track_tile.dart';
 import 'widgets.dart';
@@ -26,7 +27,7 @@ class LibraryTab extends StatefulWidget {
 class _LibraryTabState extends State<LibraryTab>
     with SingleTickerProviderStateMixin {
   static const _tabs = [
-    'Tracks', 'Albums', 'Artists', 'Genres', 'Folders', 'Playlists', 'History', 'Most played'
+    'Tracks', 'Albums', 'Artists', 'Genres', 'Folders', 'Playlists', 'Queues', 'History', 'Most played'
   ];
   late final TabController _tc = TabController(length: _tabs.length, vsync: this);
   final _searchCtrl = TextEditingController();
@@ -145,6 +146,7 @@ class _LibraryTabState extends State<LibraryTab>
                   _GenresView(lib: lib, query: _query),
                   _FoldersView(lib: lib, query: _query),
                   PlaylistsView(query: _query),
+                  QueuesView(query: _query),
                   HistoryView(query: _query),
                   MostPlayedView(query: _query),
                 ],
@@ -530,6 +532,7 @@ class LocalAlbumScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
     return Scaffold(
+      bottomNavigationBar: const SelectionBar(),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -763,6 +766,7 @@ class TrackListScreen extends StatelessWidget {
         backgroundColor: PA.background,
         title: Text(title, style: const TextStyle(fontSize: 17)),
       ),
+      bottomNavigationBar: const SelectionBar(),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

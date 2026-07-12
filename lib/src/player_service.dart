@@ -32,6 +32,10 @@ class PlayerService {
 
   HistoryService? history;
   SettingsService? settings;
+
+  /// Notified whenever a brand-new queue starts (for the saved-queues archive).
+  void Function(List<Track>)? onNewQueue;
+
   Timer? _tick;
 
   PlayerService(this.bridge) {
@@ -114,6 +118,7 @@ class PlayerService {
     _queue = List.of(tracks);
     queueRevision.value++;
     _saveQueueSoon();
+    onNewQueue?.call(_queue);
     await _player.setAudioSources(
       _queue.map(_sourceFor).toList(),
       initialIndex: startIndex,
@@ -127,6 +132,7 @@ class PlayerService {
     _queue = List.of(tracks);
     queueRevision.value++;
     _saveQueueSoon();
+    onNewQueue?.call(_queue);
     await _player.setAudioSources(_queue.map(_sourceFor).toList());
     await _player.setShuffleModeEnabled(true);
     await _player.shuffle();

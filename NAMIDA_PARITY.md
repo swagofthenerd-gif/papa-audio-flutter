@@ -34,7 +34,8 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] PC bridge library — albums grid streamed lossless from the desktop bridge
 - [x] Genres tab — group by genre tag with counts and per-genre track lists (Android 11+ tags)
 - [ ] Genre collage artwork cards (W3)
-- [ ] Multi-select — long-press select, range select, floating panel with bulk queue/playlist/edit/delete (W2)
+- [x] Multi-select — long-press selects, tap toggles, bulk bar: play / play next / queue / add to playlist
+- [ ] Multi-select extras — range selection, bulk tag-edit and delete (W2)
 - [ ] Track deletion — delete file from device with confirm; keep a recently-deleted trail (W2)
 - [ ] Grid density — per-tab column count (1–4 or auto by screen width), persisted (W2)
 - [ ] Library tabs editor — reorder/enable/disable tabs (min 2), default startup tab auto or fixed (W2)
@@ -95,7 +96,8 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [ ] Repeat N times — repeat current track N times before advancing, live adjustable remaining count (W2)
 - [ ] Queue-end behavior — jump to first after finish; infinite wrap on next/previous (W2)
 - [ ] Seek step config — fixed seconds or % of track; tap time labels to seek; hold to fast-forward/rewind (W2)
-- [ ] Track-tap play modes — build queue from selected track only / results / album / artist / genre; gentle-insert mode (W2)
+- [x] Track-tap play modes — whole list / single track / gentle insert-into-queue, in settings
+- [ ] Tap-mode extras — build queue from album / artist / genre of the tapped track (W2)
 - [ ] Play-error handling — cancellable 7s auto-skip countdown; rapid-skip debounce loads only the final target (W2)
 - [ ] Per-collection resume — albums/artists/playlists/folders remember the last played item, resume FAB (W2)
 - [ ] Restore last position for long tracks (configurable minimum duration) (W2)
@@ -114,7 +116,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Queue undo — removed items restorable via snackbar at their original index
 - [x] Bulk removal — duplicates / all previous / all next, with removed counts
 - [ ] Insertion depth — play after N tracks, play after current group, remove all-except-current (W2)
-- [ ] Saved queues page — auto-archived dated queues, replay/edit/delete, redundant-queue cleaner (W2)
+- [x] Saved queues — auto-archived dated queues (Queues tab), replay, swipe-delete, same-set dedupe
 - [ ] Same-set detection — replaying an identical track set restructures in place instead of rebuilding (W2)
 - [ ] Shuffle behavior setting — shuffle whole queue vs only the items after the current one (W2)
 - [x] Queue auto-scroll — opens at the current track, jump-to-current button

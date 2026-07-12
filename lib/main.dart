@@ -10,6 +10,7 @@ import 'src/ui/downloads_tab.dart';
 import 'src/ui/library_tab.dart';
 import 'src/ui/player_sheet.dart';
 import 'src/ui/search_tab.dart';
+import 'src/ui/selection_bar.dart';
 import 'src/ui/track_tile.dart';
 import 'src/ui/widgets.dart';
 
@@ -166,6 +167,7 @@ class _ShellState extends State<Shell> {
                   ),
                 ),
               ),
+              const SelectionBar(),
               // Reserve the mini player's slot when a track is loaded.
               StreamBuilder<int?>(
                 stream: ps.currentIndex,
@@ -284,6 +286,7 @@ class AlbumScreen extends StatelessWidget {
     final s = context.read<AppState>();
     final art = s.bridge.artUrl(album.artPath, width: 600);
     return Scaffold(
+      bottomNavigationBar: const SelectionBar(),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(

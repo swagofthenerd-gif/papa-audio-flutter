@@ -106,19 +106,32 @@ class TrackTile extends StatelessWidget {
 
   Widget _tile(PlayerService ps) {
     return Builder(
-      builder: (context) => StreamBuilder<int?>(
+      builder: (context) {
+        final sel = context.read<AppState>().selection;
+        return StreamBuilder<int?>(
         stream: ps.currentIndex,
         builder: (_, _) {
           final isCurrent = ps.currentTrack?.key == track.key;
+          return AnimatedBuilder(
+            animation: sel,
+            builder: (context, _) {
+          final selected = sel.active && sel.contains(track);
           return ListTile(
-            leading: leading ??
-                (showArt
-                    ? TrackArt(
-                        artUri: track.artUri,
-                        artPath: track.artPath,
-                        size: 44,
-                        px: 120)
-                    : null),
+            selected: selected,
+            selectedTileColor: PA.accent.withValues(alpha: 0.14),
+            leading: selected
+                ? const SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Icon(Icons.check_circle, color: PA.accent))
+                : leading ??
+                    (showArt
+                        ? TrackArt(
+                            artUri: track.artUri,
+                            artPath: track.artPath,
+                            size: 44,
+                            px: 120)
+                        : null),
             title: Text(track.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -148,11 +161,16 @@ class TrackTile extends StatelessWidget {
                 ),
               ],
             ),
-            onTap: onTap,
-            onLongPress: () => showTrackMenu(context, track),
+            onTap: () => sel.active ? sel.toggle(track) : onTap(),
+            // Long-press starts (or extends) multi-select, Namida-style; the
+            // context menu stays reachable via the ⋮ button.
+            onLongPress: () => sel.toggle(track),
+          );
+            },
           );
         },
-      ),
+        );
+      },
     );
   }
 

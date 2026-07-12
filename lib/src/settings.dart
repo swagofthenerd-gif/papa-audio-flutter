@@ -19,6 +19,9 @@ class SettingsService extends ChangeNotifier {
   SwipeAction swipeRight = SwipeAction.playNext;
   SwipeAction swipeLeft = SwipeAction.addToQueue;
 
+  // What tapping a track does to the queue.
+  TapMode tapMode = TapMode.list;
+
   Future<void> init() async {
     final p = _prefs = await SharedPreferences.getInstance();
     playPauseFade = p.getBool('s.fade') ?? true;
@@ -32,6 +35,8 @@ class SettingsService extends ChangeNotifier {
     swipeLeft = SwipeAction.values[
         (p.getInt('s.swipeLeft') ?? SwipeAction.addToQueue.index)
             .clamp(0, SwipeAction.values.length - 1)];
+    tapMode = TapMode.values[(p.getInt('s.tapMode') ?? TapMode.list.index)
+        .clamp(0, TapMode.values.length - 1)];
     notifyListeners();
   }
 
@@ -47,7 +52,17 @@ class SettingsService extends ChangeNotifier {
     p.setInt('s.listenSeconds', listenSeconds);
     p.setInt('s.swipeRight', swipeRight.index);
     p.setInt('s.swipeLeft', swipeLeft.index);
+    p.setInt('s.tapMode', tapMode.index);
   }
+}
+
+enum TapMode {
+  list('Play the whole list'),
+  single('Play only that track'),
+  gentle('Gentle — insert into the current queue');
+
+  final String label;
+  const TapMode(this.label);
 }
 
 enum SwipeAction {

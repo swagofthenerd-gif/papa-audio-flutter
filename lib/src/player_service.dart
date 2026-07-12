@@ -45,10 +45,20 @@ class PlayerService {
       final t = currentTrack;
       if (t != null) history?.onPositionTick(t);
       _sleepOnTick();
+      _transitionFadeOnTick();
       if (++_posTicks % 5 == 0) _savePosition();
     });
-    // Chained play-next resets once playback moves to a new track.
-    _player.currentIndexStream.listen((_) => _lastInsert = null);
+    // Chained play-next resets once playback moves to a new track; when
+    // transition fades are on, each new track opens with a short fade-in.
+    _player.currentIndexStream.listen((_) {
+      _lastInsert = null;
+      final fadeSec = settings?.transitionFadeSec ?? 0;
+      if (fadeSec > 0 && _player.playing) {
+        final seq = ++_rampSeq;
+        _player.setVolume(0.15);
+        _ramp(0.15, _baseVolume, (fadeSec * 350).clamp(700, 2500), seq);
+      }
+    });
   }
 
   /// Apply persisted audio settings once they're loaded.
@@ -416,6 +426,25 @@ class PlayerService {
       } else {
         sleepTimer.value = SleepTimerState(endsAt: null, tracksLeft: _sleepTracksLeft);
       }
+    }
+  }
+
+  /// Fade the tail of the current track when transition fades are enabled.
+  /// The paired fade-in runs from the currentIndex listener; ExoPlayer's
+  /// playlist advance is already gapless, so tail-fade + head-fade reads as a
+  /// soft crossfade without a second player.
+  void _transitionFadeOnTick() {
+    final fadeSec = settings?.transitionFadeSec ?? 0;
+    if (fadeSec <= 0 || _player.loopMode == LoopMode.one) return;
+    final duration = _player.duration;
+    if (duration == null || duration == Duration.zero) return;
+    final remaining = duration - _player.position;
+    if (remaining.inSeconds <= fadeSec && remaining.inSeconds >= 0) {
+      // Don't fight an in-flight manual ramp (play/pause or sleep fade).
+      final v = (remaining.inMilliseconds / (fadeSec * 1000))
+          .clamp(0.15, 1.0)
+          .toDouble();
+      if (v < _player.volume) _player.setVolume(v);
     }
   }
 

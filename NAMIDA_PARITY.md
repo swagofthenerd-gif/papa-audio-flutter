@@ -81,7 +81,8 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Sleep timer — after N minutes or N tracks, gentle fade-out, cancellable, visible active state
 - [x] Shuffle toggle; repeat off / all / one cycle
 - [x] Background & lock-screen playback with media-notification artwork
-- [ ] Crossfade — configurable duration plus auto-trigger seconds before track end (W2)
+- [x] Transition fades — configurable fade-out/fade-in (0–10s) around gapless track changes
+- [ ] True overlapping crossfade — needs a custom audio_service handler with two players; the background plugin allows only one (W2)
 - [x] Play/pause fade — volume ramps over a configurable duration (100–1000ms)
 - [x] Skip silence
 - [x] Pitch control — semitone display, link speed & pitch, one-tap 432Hz
@@ -191,8 +192,11 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 
 ## Lyrics
 
-- [ ] LRC sourcing — embedded tags, sibling .lrc files, cache, online fetch preferring duration-closest match (W3)
-- [ ] Synced auto-scroll view — active line pinned near center, tap a line to seek, touch pauses auto-scroll (W3)
+- [x] LRC sourcing — LRCLIB fetch preferring duration-closest match, SQLite cache incl. negative caching
+- [x] Synced karaoke view — active line centered/highlighted with neighbors dimmed, binary-searched per tick; plain-text fallback
+- [x] Lyrics toggles — double-tap artwork or lyrics button swaps artwork for lyrics in place
+- [ ] LRC sourcing extras — embedded tags and sibling .lrc files (W3)
+- [ ] Full scrolling lyrics sheet — tap a line to seek, touch pauses auto-scroll (W3)
 - [ ] Active-line styling — highlight pill, scale/dim neighbors, RTL and multi-language rendering (W3)
 - [ ] Word-by-word karaoke sweep for word-synced lyrics (W3)
 - [ ] Fullscreen lyrics — long-press artwork opens blurred-artwork fullscreen with transport controls (W3)
@@ -266,7 +270,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 
 Behaviors only — Papa Audio's Spotify-style visual identity is kept throughout.
 
-- [ ] Dynamic color — extract a palette from the current artwork to tint player accents (W3)
+- [x] Dynamic color — dominant artwork color (hue-bucket extraction, no deps) tints the expanded player; toggleable
 - [ ] Light / dark / system modes plus a pitch-black AMOLED dark variant (W3)
 - [ ] Wallpaper (Material You) accent option on Android 12+ (W3)
 - [ ] Custom accent colors with a full picker; per-track palette editor (W3)

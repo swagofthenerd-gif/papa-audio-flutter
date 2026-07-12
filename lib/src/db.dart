@@ -18,7 +18,10 @@ class AppDatabase {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       '$dir${Platform.pathSeparator}papa_audio.db',
-      version: 1,
+      version: 2,
+      onUpgrade: (db, oldVersion, _) async {
+        if (oldVersion < 2) await _createLyricsTable(db);
+      },
       onCreate: (db, _) async {
         await db.execute('CREATE TABLE history('
             'id INTEGER PRIMARY KEY AUTOINCREMENT,'
@@ -51,12 +54,20 @@ class AppDatabase {
         await db.execute('CREATE TABLE kv('
             'k TEXT PRIMARY KEY,'
             'v TEXT NOT NULL)');
+        await _createLyricsTable(db);
       },
     );
     final wrapper = AppDatabase._(db);
     await wrapper._importLegacyJson();
     return wrapper;
   }
+
+  static Future<void> _createLyricsTable(Database db) => db.execute(
+      'CREATE TABLE IF NOT EXISTS lyrics('
+      'track_key TEXT PRIMARY KEY,'
+      'synced TEXT NOT NULL,'
+      'plain TEXT NOT NULL,'
+      'fetched_at INTEGER NOT NULL)');
 
   // ── kv helpers ──────────────────────────────────────────────────────────────
 

@@ -61,6 +61,45 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
               ),
+            ListTile(
+              leading: const Icon(Icons.compare_arrows, color: PA.textSecondary),
+              title: const Text('Transition fade'),
+              subtitle: Text(
+                  st.transitionFadeSec == 0
+                      ? 'Off — tracks change instantly'
+                      : 'Fades out/in over ${st.transitionFadeSec}s at track changes',
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 68, right: 16),
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  activeTrackColor: PA.accent,
+                  inactiveTrackColor: PA.card,
+                  thumbColor: Colors.white,
+                ),
+                child: Slider(
+                  min: 0,
+                  max: 10,
+                  divisions: 10,
+                  label: st.transitionFadeSec == 0
+                      ? 'Off'
+                      : '${st.transitionFadeSec}s',
+                  value: st.transitionFadeSec.toDouble(),
+                  onChanged: (v) =>
+                      st.update(() => st.transitionFadeSec = v.round()),
+                ),
+              ),
+            ),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
+              secondary: const Icon(Icons.palette_outlined, color: PA.textSecondary),
+              title: const Text('Dynamic player colors'),
+              subtitle: const Text('Tint the player with the artwork\'s color',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.dynamicColors,
+              onChanged: (v) => st.update(() => st.dynamicColors = v),
+            ),
             SwitchListTile(
               activeThumbColor: PA.accent,
               secondary: const Icon(Icons.fast_forward, color: PA.textSecondary),

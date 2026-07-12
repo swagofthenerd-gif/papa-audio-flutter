@@ -1,10 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'art_color.dart';
 import 'bridge.dart';
 import 'db.dart';
 import 'downloads.dart';
 import 'history.dart';
+import 'lyrics.dart';
 import 'local_library.dart';
 import 'models.dart';
 import 'player_service.dart';
@@ -27,6 +29,9 @@ class AppState extends ChangeNotifier {
   final SettingsService settings = SettingsService();
   final QueuesStore queues = QueuesStore();
   final TrackSelection selection = TrackSelection();
+  late final ArtColorService artColors =
+      ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));
+  LyricsService? lyrics; // created once the DB is open
 
   // Flush pending listens the moment the app leaves the foreground, so an OS
   // process kill after hours of playback never loses history.
@@ -61,6 +66,7 @@ class AppState extends ChangeNotifier {
     playerService.history = history;
     _lifecycle ??= AppLifecycleListener(onInactive: () => history.flush());
     final db = await AppDatabase.open();
+    lyrics = LyricsService(db);
     await Future.wait([
       downloads.init(),
       playlists.init(db),

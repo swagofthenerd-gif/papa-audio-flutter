@@ -14,6 +14,14 @@ class SettingsService extends ChangeNotifier {
   bool skipSilence = false;
   bool linkSpeedPitch = false;
 
+  /// Seconds of fade-out before a track ends / fade-in after it changes.
+  /// 0 = off. (True overlapping crossfade needs a second player, which the
+  /// background-audio plugin forbids — this is the single-player version.)
+  int transitionFadeSec = 0;
+
+  /// Tint the expanded player with the current artwork's dominant color.
+  bool dynamicColors = true;
+
   // Listen counting
   int listenSeconds = 20;
 
@@ -52,6 +60,8 @@ class SettingsService extends ChangeNotifier {
             .clamp(0, SwipeAction.values.length - 1)];
     tapMode = TapMode.values[(p.getInt('s.tapMode') ?? TapMode.list.index)
         .clamp(0, TapMode.values.length - 1)];
+    transitionFadeSec = p.getInt('s.transitionFadeSec') ?? 0;
+    dynamicColors = p.getBool('s.dynamicColors') ?? true;
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
     genreSeparators = p.getStringList('s.genreSeps') ?? genreSeparators;
     splitBlacklist = p.getStringList('s.splitBlacklist') ?? splitBlacklist;
@@ -73,6 +83,8 @@ class SettingsService extends ChangeNotifier {
     p.setInt('s.swipeRight', swipeRight.index);
     p.setInt('s.swipeLeft', swipeLeft.index);
     p.setInt('s.tapMode', tapMode.index);
+    p.setInt('s.transitionFadeSec', transitionFadeSec);
+    p.setBool('s.dynamicColors', dynamicColors);
     p.setStringList('s.artistSeps', artistSeparators);
     p.setStringList('s.genreSeps', genreSeparators);
     p.setStringList('s.splitBlacklist', splitBlacklist);

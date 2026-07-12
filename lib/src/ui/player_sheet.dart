@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
+import '../lyrics.dart';
 import '../models.dart';
 import '../player_service.dart';
 import '../theme.dart';
@@ -37,10 +38,33 @@ class _PlayerSheetState extends State<PlayerSheet>
   double get t => _c.value;
   bool get expanded => t > 0.5;
 
+  /// Lyrics view replaces the artwork while on (toggled by double-tap or the
+  /// lyrics button). Lives here so the morphing artwork can hide with it.
+  final ValueNotifier<bool> lyricsOn = ValueNotifier(false);
+
+  Color? _artColor; // dominant artwork color for the expanded background
+  String? _artColorKey;
+
   @override
   void dispose() {
+    lyricsOn.dispose();
     _c.dispose();
     super.dispose();
+  }
+
+  void _updateArtColor(BuildContext context, Track track) {
+    if (_artColorKey == track.key) return;
+    _artColorKey = track.key;
+    final s = context.read<AppState>();
+    if (!s.settings.dynamicColors) {
+      _artColor = null;
+      return;
+    }
+    s.artColors.forTrack(track).then((c) {
+      if (mounted && _artColorKey == track.key) {
+        setState(() => _artColor = c);
+      }
+    });
   }
 
   // ── Vertical drag: the sheet follows the finger, then springs ──────────────
@@ -85,11 +109,13 @@ class _PlayerSheetState extends State<PlayerSheet>
         // per-frame AnimatedBuilder below only repositions and re-fades these
         // exact instances, so Flutter skips rebuilding them (identical widget
         // => element reuse) and the drag morph stays at native frame rate.
+        _updateArtColor(context, track);
         final fullPlayer = _FullPlayer(
           ps: ps,
           track: track,
           topInset: topInset,
           artSide: fullSide,
+          lyricsOn: lyricsOn,
           onCollapse: () => _c.fling(velocity: -2.2),
         );
         final miniBar = _MiniBar(ps: ps, track: track);
@@ -142,7 +168,15 @@ class _PlayerSheetState extends State<PlayerSheet>
                       onVerticalDragEnd: (d) => _onVDragEnd(d, travel),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: Color.lerp(PA.surfaceElevated, PA.background, t),
+                          // Expanded background tints toward the artwork's
+                          // dominant color (subtle — Spotify-dark stays boss).
+                          color: Color.lerp(
+                              PA.surfaceElevated,
+                              _artColor != null
+                                  ? Color.lerp(
+                                      PA.background, _artColor, 0.38)!
+                                  : PA.background,
+                              t),
                           borderRadius: BorderRadius.vertical(
                               top: Radius.circular(
                                   12 * (1 - t) + 16 * t * (1 - t))),
@@ -175,14 +209,21 @@ class _PlayerSheetState extends State<PlayerSheet>
                               ),
                             // Morphing artwork: the SAME decoded image is
                             // scaled between its two rects — no reload/redecode
-                            // during the drag.
+                            // during the drag. Hidden while lyrics are showing
+                            // in the expanded player.
                             Positioned.fromRect(
                               rect: artRect,
-                              child: ClipRRect(
-                                borderRadius:
-                                    BorderRadius.circular(4 + 6 * t),
-                                child: FittedBox(
-                                    fit: BoxFit.fill, child: art),
+                              child: ValueListenableBuilder<bool>(
+                                valueListenable: lyricsOn,
+                                builder: (_, lyr, child) => Opacity(
+                                    opacity: lyr && t > 0.5 ? 0 : 1,
+                                    child: child),
+                                child: ClipRRect(
+                                  borderRadius:
+                                      BorderRadius.circular(4 + 6 * t),
+                                  child: FittedBox(
+                                      fit: BoxFit.fill, child: art),
+                                ),
                               ),
                             ),
                           ],
@@ -312,12 +353,14 @@ class _FullPlayer extends StatelessWidget {
   final Track track;
   final double topInset;
   final double artSide; // must match the sheet's morph target rect
+  final ValueNotifier<bool> lyricsOn;
   final VoidCallback onCollapse;
   const _FullPlayer(
       {required this.ps,
       required this.track,
       required this.topInset,
       required this.artSide,
+      required this.lyricsOn,
       required this.onCollapse});
 
   @override
@@ -347,14 +390,28 @@ class _FullPlayer extends StatelessWidget {
               ),
             ],
           ),
-          // Swiping the (invisible slot under the) artwork changes track too.
+          // The artwork slot: swipe changes track, double-tap toggles lyrics.
+          // While lyrics are on, the morphing art hides and this panel shows
+          // the synced lines in the same rect.
           GestureDetector(
+            onDoubleTap: () => lyricsOn.value = !lyricsOn.value,
             onHorizontalDragEnd: (d) {
               final v = d.velocity.pixelsPerSecond.dx;
               if (v < -300) ps.next();
               if (v > 300) ps.previousSmart();
             },
-            child: SizedBox(height: artSide + 16),
+            child: ValueListenableBuilder<bool>(
+              valueListenable: lyricsOn,
+              builder: (_, lyr, _) => SizedBox(
+                height: artSide + 16,
+                child: lyr
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: _LyricsPanel(ps: ps, track: track),
+                      )
+                    : null,
+              ),
+            ),
           ),
           Row(
             children: [
@@ -408,6 +465,15 @@ class _FullPlayer extends StatelessWidget {
                   );
                 },
               ),
+              ValueListenableBuilder<bool>(
+                valueListenable: lyricsOn,
+                builder: (_, lyr, _) => IconButton(
+                  tooltip: 'Lyrics',
+                  icon: Icon(Icons.lyrics_outlined,
+                      size: 20, color: lyr ? PA.accent : PA.textMuted),
+                  onPressed: () => lyricsOn.value = !lyr,
+                ),
+              ),
               StreamBuilder<bool>(
                 stream: ps.equalizer.enabledStream,
                 builder: (_, snap) => IconButton(
@@ -428,6 +494,96 @@ class _FullPlayer extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Synced-lyrics karaoke view: previous/current/next lines with the active one
+/// highlighted, driven by the position stream over a binary-searched index.
+/// Falls back to scrollable plain text when only unsynced lyrics exist.
+class _LyricsPanel extends StatelessWidget {
+  final PlayerService ps;
+  final Track track;
+  const _LyricsPanel({required this.ps, required this.track});
+
+  @override
+  Widget build(BuildContext context) {
+    final svc = context.read<AppState>().lyrics;
+    if (svc == null) return const SizedBox.shrink();
+    return FutureBuilder<Lyrics?>(
+      future: svc.forTrack(track),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Center(
+              child: SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: PA.accent)));
+        }
+        final lyrics = snap.data;
+        if (lyrics == null || lyrics.isEmpty) {
+          return const Center(
+              child: Text('No lyrics found',
+                  style: TextStyle(color: PA.textSecondary)));
+        }
+        if (!lyrics.hasSynced) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(lyrics.plain,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: PA.textSecondary, fontSize: 15, height: 1.6)),
+          );
+        }
+        return StreamBuilder<Duration>(
+          stream: ps.position,
+          builder: (_, posSnap) {
+            final idx =
+                lrcLineIndexAt(lyrics.synced, posSnap.data ?? Duration.zero);
+            String lineAt(int i) =>
+                (i >= 0 && i < lyrics.synced.length) ? lyrics.synced[i].text : '';
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (final off in [-2, -1])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Text(lineAt(idx + off),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: PA.textMuted, fontSize: 15)),
+                  ),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                  child: Text(idx >= 0 ? lineAt(idx) : '…',
+                      textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: PA.text,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          height: 1.3)),
+                ),
+                for (final off in [1, 2])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Text(lineAt(idx + off),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: PA.textSecondary, fontSize: 15)),
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

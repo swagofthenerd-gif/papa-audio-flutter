@@ -15,6 +15,9 @@ class LocalLibrary extends ChangeNotifier {
   String? error;
   List<LocalAlbum> albums = [];
 
+  /// Bumped on every (re)load — cheap change detection for list memoization.
+  int revision = 0;
+
   int get trackCount => albums.fold(0, (n, a) => n + a.tracks.length);
 
   /// Silent init: if permission was already granted, load without prompting.
@@ -50,6 +53,7 @@ class LocalLibrary extends ChangeNotifier {
     try {
       final rows = await _ch.invokeListMethod<Map>('queryTracks') ?? [];
       albums = _group(rows);
+      revision++;
     } catch (e) {
       error = 'Failed to read music library: $e';
     } finally {

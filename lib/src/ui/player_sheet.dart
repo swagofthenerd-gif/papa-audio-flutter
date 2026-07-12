@@ -32,8 +32,6 @@ class _PlayerSheetState extends State<PlayerSheet>
     duration: const Duration(milliseconds: 380),
   )..addStatusListener((_) => setState(() {}));
 
-  double _hDrag = 0; // horizontal swipe offset of the mini content
-
   double get t => _c.value;
   bool get expanded => t > 0.5;
 
@@ -58,22 +56,6 @@ class _PlayerSheetState extends State<PlayerSheet>
     }
   }
 
-  // ── Horizontal swipe on mini bar: next / previous ───────────────────────────
-
-  void _onHDragEnd(DragEndDetails d, double width, PlayerService ps) async {
-    final v = d.velocity.pixelsPerSecond.dx;
-    final commit = _hDrag.abs() > width / 3 || v.abs() > 700;
-    if (commit) {
-      final forward = _hDrag < 0 || v < -700;
-      if (forward) {
-        await ps.next();
-      } else {
-        await ps.previousSmart();
-      }
-    }
-    if (mounted) setState(() => _hDrag = 0);
-  }
-
   @override
   Widget build(BuildContext context) {
     final ps = context.read<AppState>().playerService;
@@ -89,6 +71,35 @@ class _PlayerSheetState extends State<PlayerSheet>
         final topInset = MediaQuery.paddingOf(context).top;
         final collapsedTop = size.height - widget.navHeight - PlayerSheet.miniHeight;
         final travel = collapsedTop; // distance between the two states
+        final fullSide = (size.width - 48).clamp(0.0, 380.0);
+
+        // Heavy subtrees are built ONCE here (per track/stream event). The
+        // per-frame AnimatedBuilder below only repositions and re-fades these
+        // exact instances, so Flutter skips rebuilding them (identical widget
+        // => element reuse) and the drag morph stays at native frame rate.
+        final fullPlayer = _FullPlayer(
+          ps: ps,
+          track: track,
+          topInset: topInset,
+          onCollapse: () => _c.fling(velocity: -2.2),
+        );
+        final miniBar = _MiniBar(ps: ps, track: track);
+        final art = IgnorePointer(
+          child: SizedBox(
+            width: fullSide,
+            height: fullSide,
+            child: TrackArt(
+              artUri: track.artUri,
+              artPath: track.artPath,
+              size: fullSide,
+              radius: 0,
+              px: 800,
+            ),
+          ),
+        );
+        const miniRect = Rect.fromLTWH(8, 9, 44, 44);
+        final fullRect = Rect.fromLTWH(
+            (size.width - fullSide) / 2, topInset + 76, fullSide, fullSide);
 
         return PopScope(
           canPop: !expanded,
@@ -101,70 +112,70 @@ class _PlayerSheetState extends State<PlayerSheet>
               final top = collapsedTop * (1 - t);
               final miniOpacity = (1 - t * 2.2).clamp(0.0, 1.0);
               final fullOpacity = ((t - 0.55) / 0.45).clamp(0.0, 1.0);
+              final artRect =
+                  Rect.lerp(miniRect, fullRect, Curves.easeInOut.transform(t))!;
               return Stack(
                 children: [
                   Positioned(
-                left: 0,
-                right: 0,
-                top: top,
-                bottom: 0,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: t < 0.1 ? () => _c.fling(velocity: 2.2) : null,
-                  onVerticalDragUpdate: (d) => _onVDragUpdate(d, travel),
-                  onVerticalDragEnd: (d) => _onVDragEnd(d, travel),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Color.lerp(PA.surfaceElevated, PA.background, t),
-                      borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(12 * (1 - t) + 16 * t * (1 - t))),
-                    ),
-                    child: Stack(
-                      children: [
-                        if (fullOpacity > 0)
-                          Positioned.fill(
-                            child: Opacity(
-                              opacity: fullOpacity,
-                              child: IgnorePointer(
-                                ignoring: fullOpacity < 0.4,
-                                child: _FullPlayer(
-                                  ps: ps,
-                                  track: track,
-                                  topInset: topInset,
-                                  onCollapse: () => _c.fling(velocity: -2.2),
+                    left: 0,
+                    right: 0,
+                    top: top,
+                    bottom: 0,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: t < 0.1 ? () => _c.fling(velocity: 2.2) : null,
+                      onVerticalDragUpdate: (d) => _onVDragUpdate(d, travel),
+                      onVerticalDragEnd: (d) => _onVDragEnd(d, travel),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Color.lerp(PA.surfaceElevated, PA.background, t),
+                          borderRadius: BorderRadius.vertical(
+                              top: Radius.circular(
+                                  12 * (1 - t) + 16 * t * (1 - t))),
+                        ),
+                        child: Stack(
+                          children: [
+                            if (fullOpacity > 0)
+                              Positioned.fill(
+                                child: Opacity(
+                                  opacity: fullOpacity,
+                                  child: IgnorePointer(
+                                    ignoring: fullOpacity < 0.4,
+                                    child: fullPlayer,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
-                        if (miniOpacity > 0)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            top: 0,
-                            height: PlayerSheet.miniHeight,
-                            child: Opacity(
-                              opacity: miniOpacity,
-                              child: IgnorePointer(
-                                ignoring: miniOpacity < 0.4,
-                                child: _MiniBar(
-                                  ps: ps,
-                                  track: track,
-                                  hDrag: _hDrag,
-                                  onHDragUpdate: (d) =>
-                                      setState(() => _hDrag += d.delta.dx),
-                                  onHDragEnd: (d) =>
-                                      _onHDragEnd(d, size.width, ps),
+                            if (miniOpacity > 0)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: 0,
+                                height: PlayerSheet.miniHeight,
+                                child: Opacity(
+                                  opacity: miniOpacity,
+                                  child: IgnorePointer(
+                                    ignoring: miniOpacity < 0.4,
+                                    child: miniBar,
+                                  ),
                                 ),
                               ),
+                            // Morphing artwork: the SAME decoded image is
+                            // scaled between its two rects — no reload/redecode
+                            // during the drag.
+                            Positioned.fromRect(
+                              rect: artRect,
+                              child: ClipRRect(
+                                borderRadius:
+                                    BorderRadius.circular(4 + 6 * t),
+                                child: FittedBox(
+                                    fit: BoxFit.fill, child: art),
+                              ),
                             ),
-                          ),
-                        // The morphing artwork rides on top of both layers.
-                        _MorphingArt(track: track, t: t, size: size, topInset: topInset),
-                      ],
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
                 ],
               );
             },
@@ -175,60 +186,39 @@ class _PlayerSheetState extends State<PlayerSheet>
   }
 }
 
-/// Artwork that interpolates from its 44px slot in the mini bar to the large
-/// centered square of the full player — the visual thread tying both states.
-class _MorphingArt extends StatelessWidget {
-  final Track track;
-  final double t;
-  final Size size;
-  final double topInset;
-  const _MorphingArt(
-      {required this.track, required this.t, required this.size, required this.topInset});
-
-  @override
-  Widget build(BuildContext context) {
-    const miniRect = Rect.fromLTWH(8, 9, 44, 44);
-    final side = (size.width - 48).clamp(0.0, 380.0);
-    final fullRect = Rect.fromLTWH(
-        (size.width - side) / 2, topInset + 76, side, side);
-    final r = Rect.lerp(miniRect, fullRect, Curves.easeInOut.transform(t))!;
-    return Positioned(
-      left: r.left,
-      top: r.top,
-      width: r.width,
-      height: r.height,
-      child: IgnorePointer(
-        child: TrackArt(
-          artUri: track.artUri,
-          artPath: track.artPath,
-          size: r.width,
-          radius: 4 + 6 * t,
-          px: 800,
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniBar extends StatelessWidget {
+/// Mini bar. Owns its horizontal swipe offset so pointer moves only rebuild
+/// this small widget, never the whole sheet.
+class _MiniBar extends StatefulWidget {
   final PlayerService ps;
   final Track track;
-  final double hDrag;
-  final void Function(DragUpdateDetails) onHDragUpdate;
-  final void Function(DragEndDetails) onHDragEnd;
-  const _MiniBar({
-    required this.ps,
-    required this.track,
-    required this.hDrag,
-    required this.onHDragUpdate,
-    required this.onHDragEnd,
-  });
+  const _MiniBar({required this.ps, required this.track});
+
+  @override
+  State<_MiniBar> createState() => _MiniBarState();
+}
+
+class _MiniBarState extends State<_MiniBar> {
+  double _hDrag = 0;
+
+  Future<void> _onHDragEnd(DragEndDetails d) async {
+    final drag = _hDrag;
+    final width = MediaQuery.sizeOf(context).width;
+    final v = d.velocity.pixelsPerSecond.dx;
+    final commit = drag.abs() > width / 3 || v.abs() > 700;
+    if (mounted) setState(() => _hDrag = 0);
+    if (commit) {
+      final forward = drag < 0 || v < -700;
+      forward ? await widget.ps.next() : await widget.ps.previousSmart();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final ps = widget.ps;
+    final track = widget.track;
     return GestureDetector(
-      onHorizontalDragUpdate: onHDragUpdate,
-      onHorizontalDragEnd: onHDragEnd,
+      onHorizontalDragUpdate: (d) => setState(() => _hDrag += d.delta.dx),
+      onHorizontalDragEnd: _onHDragEnd,
       child: Column(
         children: [
           StreamBuilder<Duration?>(
@@ -257,9 +247,9 @@ class _MiniBar extends StatelessWidget {
                   // Title block slides with the horizontal swipe, hinting the
                   // track change before it commits.
                   child: Transform.translate(
-                    offset: Offset(hDrag * 0.6, 0),
+                    offset: Offset(_hDrag * 0.6, 0),
                     child: Opacity(
-                      opacity: (1 - (hDrag.abs() / 260)).clamp(0.25, 1.0),
+                      opacity: (1 - (_hDrag.abs() / 260)).clamp(0.25, 1.0),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.start,

@@ -240,8 +240,8 @@ class PlayerService {
       _queueFile = File('${docs.path}${Platform.pathSeparator}queue.json');
       _posFile = File('${docs.path}${Platform.pathSeparator}queue_pos.json');
       if (!await _queueFile!.exists()) return;
-      final j =
-          jsonDecode(await _queueFile!.readAsString()) as Map<String, dynamic>;
+      // Large queues decode off the UI thread — startup stays smooth.
+      final j = await compute(_decodeMap, await _queueFile!.readAsString());
       final tracks = ((j['tracks'] ?? []) as List)
           .map((t) => Track.fromJson(t as Map<String, dynamic>))
           .toList();
@@ -425,6 +425,9 @@ class PlayerService {
     await _player.dispose();
   }
 }
+
+Map<String, dynamic> _decodeMap(String raw) =>
+    jsonDecode(raw) as Map<String, dynamic>;
 
 class SleepTimerState {
   final DateTime? endsAt; // minutes mode

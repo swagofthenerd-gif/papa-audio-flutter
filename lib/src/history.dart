@@ -30,7 +30,10 @@ class HistoryService extends ChangeNotifier {
     _file = File('${docs.path}${Platform.pathSeparator}history.json');
     try {
       if (await _file!.exists()) {
-        final list = jsonDecode(await _file!.readAsString()) as List;
+        // History can hold thousands of entries — decode off the UI thread so
+        // startup never drops frames.
+        final list =
+            await compute(_decodeList, await _file!.readAsString());
         for (final e in list) {
           final entry = HistoryEntry.fromJson(e as Map<String, dynamic>);
           entries.add(entry);
@@ -168,6 +171,8 @@ class HistoryService extends ChangeNotifier {
     } catch (_) {}
   }
 }
+
+List<dynamic> _decodeList(String raw) => jsonDecode(raw) as List;
 
 class HistoryEntry {
   final Track track;

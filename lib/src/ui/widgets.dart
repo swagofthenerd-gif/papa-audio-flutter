@@ -37,6 +37,12 @@ class TrackArt extends StatelessWidget {
   }
 
   Widget _image(BuildContext context) {
+    // Decode no larger than the slot actually needs (in physical pixels) — a
+    // 44px tile must never pay for a 1400px embedded-art decode.
+    final decodePx = (px * MediaQuery.devicePixelRatioOf(context) / 2)
+        .round()
+        .clamp(64, 1600)
+        .toInt();
     final a = artUri;
     if (a != null && a.startsWith('localart://')) {
       return FutureBuilder<Uint8List?>(
@@ -50,6 +56,7 @@ class TrackArt extends StatelessWidget {
       return Image.file(
         File.fromUri(Uri.parse(a)),
         fit: BoxFit.cover,
+        cacheWidth: decodePx,
         errorBuilder: (_, _, _) => const ArtPlaceholder(),
       );
     }
@@ -60,6 +67,7 @@ class TrackArt extends StatelessWidget {
     return CachedNetworkImage(
       imageUrl: url,
       fit: BoxFit.cover,
+      memCacheWidth: decodePx,
       placeholder: (_, _) => Container(color: PA.card),
       errorWidget: (_, _, _) => const ArtPlaceholder(),
     );

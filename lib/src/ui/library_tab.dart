@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -31,12 +33,23 @@ class _LibraryTabState extends State<LibraryTab>
   String _query = '';
   TrackSort _sort = TrackSort.title;
   bool _sortReverse = false;
+  Timer? _debounce;
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _tc.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  /// Search re-filters ~250ms after typing stops, so keystrokes never race
+  /// a full library re-sort.
+  void _onSearchChanged(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _query = v.trim().toLowerCase());
+    });
   }
 
   @override
@@ -57,8 +70,7 @@ class _LibraryTabState extends State<LibraryTab>
                       height: 40,
                       child: TextField(
                         controller: _searchCtrl,
-                        onChanged: (v) =>
-                            setState(() => _query = v.trim().toLowerCase()),
+                        onChanged: _onSearchChanged,
                         decoration: InputDecoration(
                           hintText: 'Search your library…',
                           hintStyle: const TextStyle(fontSize: 13),
@@ -71,6 +83,7 @@ class _LibraryTabState extends State<LibraryTab>
                               : IconButton(
                                   icon: const Icon(Icons.close, size: 16),
                                   onPressed: () {
+                                    _debounce?.cancel();
                                     _searchCtrl.clear();
                                     setState(() => _query = '');
                                   },
@@ -234,37 +247,58 @@ class _TracksViewState extends State<_TracksView> {
   final _scroll = ScrollController();
   String? _railLetter; // letter under the finger while dragging the rail
 
+  // Filter + sort results are memoized: recomputed only when the inputs
+  // actually change, never on incidental rebuilds (scroll, player events).
+  List<Track> _tracks = const [];
+  Map<String, int> _letterIndex = const {};
+  String _sig = '';
+
   @override
   void dispose() {
     _scroll.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final s = context.read<AppState>();
+  void _recompute(AppState s) {
+    final sig =
+        '${widget.query}|${widget.sort.index}|${widget.reverse}|${widget.lib.revision}';
+    if (sig == _sig) return;
+    _sig = sig;
+
     var tracks = widget.lib.albums.expand((a) => a.tracks).toList();
     if (widget.query.isNotEmpty) {
       tracks = tracks.where((t) => _match(t, widget.query)).toList();
     }
     tracks.sort(_comparator(s));
     if (widget.reverse) tracks = tracks.reversed.toList();
-    if (tracks.isEmpty) return const _Empty('No tracks');
+    _tracks = tracks;
 
     final alphaSort =
         widget.sort == TrackSort.title || widget.sort == TrackSort.artist;
-    // First row index for each letter, for the A-Z rail.
     final letterIndex = <String, int>{};
     if (alphaSort) {
+      final azRe = RegExp(r'[A-Z]');
       for (var i = 0; i < tracks.length; i++) {
         final field = widget.sort == TrackSort.title
             ? tracks[i].title
             : tracks[i].artist;
         final l = field.isEmpty ? '#' : field[0].toUpperCase();
-        final key = RegExp(r'[A-Z]').hasMatch(l) ? l : '#';
-        letterIndex.putIfAbsent(key, () => i);
+        letterIndex.putIfAbsent(azRe.hasMatch(l) ? l : '#', () => i);
       }
     }
+    _letterIndex = letterIndex;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.read<AppState>();
+    _recompute(s);
+    final tracks = _tracks;
+    final letterIndex = _letterIndex;
+    if (tracks.isEmpty) return const _Empty('No tracks');
+
+    final alphaSort =
+        widget.sort == TrackSort.title || widget.sort == TrackSort.artist;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

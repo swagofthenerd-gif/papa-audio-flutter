@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
@@ -37,6 +38,38 @@ class MainActivity : FlutterActivity() {
     private val audioPermission: String
         get() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestHighRefreshRate()
+    }
+
+    /**
+     * Ask for the display's fastest mode at the current resolution (90/120Hz
+     * panels default some apps to 60) — scrolling and the player morph animate
+     * at full panel speed.
+     */
+    private fun requestHighRefreshRate() {
+        try {
+            @Suppress("DEPRECATION")
+            val display =
+                if (Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay
+            val current = display?.mode ?: return
+            val best = display.supportedModes
+                .filter {
+                    it.physicalWidth == current.physicalWidth &&
+                        it.physicalHeight == current.physicalHeight
+                }
+                .maxByOrNull { it.refreshRate } ?: return
+            if (best.modeId != current.modeId) {
+                window.attributes = window.attributes.apply {
+                    preferredDisplayModeId = best.modeId
+                }
+            }
+        } catch (_: Exception) {
+            // Not critical — stay on the default mode.
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)

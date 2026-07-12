@@ -78,8 +78,21 @@ class ArtPlaceholder extends StatelessWidget {
   const ArtPlaceholder({super.key});
   @override
   Widget build(BuildContext context) => Container(
-      color: PA.surfaceElevated,
-      child: const Center(child: Icon(Icons.music_note, color: PA.textMuted, size: 36)));
+        color: PA.surfaceElevated,
+        // Icon scales with the slot so the placeholder reads correctly at any
+        // size (incl. inside the player's FittedBox-scaled morphing artwork).
+        child: LayoutBuilder(
+          builder: (_, c) {
+            final side =
+                c.hasBoundedWidth && c.hasBoundedHeight
+                    ? (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight)
+                    : 44.0;
+            return Center(
+                child: Icon(Icons.music_note,
+                    color: PA.textMuted, size: (side * 0.5).clamp(12.0, 96.0)));
+          },
+        ),
+      );
 }
 
 class ErrorView extends StatelessWidget {

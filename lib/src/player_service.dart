@@ -301,6 +301,12 @@ class PlayerService {
 
   // ── Transport ───────────────────────────────────────────────────────────────
 
+  /// The volume the player should sit at when no fade is in flight. Fades
+  /// always resolve back to this — interrupting them can never ratchet the
+  /// real volume down (that bug plays everything silently).
+  static const _baseVolume = 1.0;
+  int _rampSeq = 0; // newer ramps cancel older ones
+
   /// Play/pause with a short volume ramp (when enabled) instead of hard cuts.
   Future<void> togglePlay() async {
     final s = settings;
@@ -309,21 +315,24 @@ class PlayerService {
     if (!fade) {
       return _player.playing ? _player.pause() : _player.play();
     }
-    final target = _player.volume <= 0 ? 1.0 : _player.volume;
+    final seq = ++_rampSeq;
     if (_player.playing) {
-      await _ramp(target, 0, ms);
+      await _ramp(_player.volume, 0, ms, seq);
+      if (seq != _rampSeq) return; // a newer toggle took over
       await _player.pause();
-      await _player.setVolume(target);
+      await _player.setVolume(_baseVolume);
     } else {
       await _player.setVolume(0);
       _player.play();
-      await _ramp(0, target, ms);
+      await _ramp(0, _baseVolume, ms, seq);
+      if (seq == _rampSeq) await _player.setVolume(_baseVolume);
     }
   }
 
-  Future<void> _ramp(double from, double to, int ms) async {
+  Future<void> _ramp(double from, double to, int ms, int seq) async {
     const steps = 8;
     for (var i = 1; i <= steps; i++) {
+      if (seq != _rampSeq) return; // cancelled by a newer ramp
       await _player.setVolume(from + (to - from) * i / steps);
       await Future.delayed(Duration(milliseconds: ms ~/ steps));
     }
@@ -417,13 +426,14 @@ class PlayerService {
 
   /// Gentle 3s fade instead of a hard stop.
   Future<void> _fadeOutAndPause() async {
-    final v = _player.volume;
+    final seq = ++_rampSeq;
     for (var i = 9; i >= 0; i--) {
-      await _player.setVolume(v * i / 10);
+      if (seq != _rampSeq) return; // user toggled play — abandon the fade
+      await _player.setVolume(_baseVolume * i / 10);
       await Future.delayed(const Duration(milliseconds: 300));
     }
     await _player.pause();
-    await _player.setVolume(v);
+    await _player.setVolume(_baseVolume);
   }
 
   Future<void> dispose() async {

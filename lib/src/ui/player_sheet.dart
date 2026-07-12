@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
@@ -71,7 +73,13 @@ class _PlayerSheetState extends State<PlayerSheet>
         final topInset = MediaQuery.paddingOf(context).top;
         final collapsedTop = size.height - widget.navHeight - PlayerSheet.miniHeight;
         final travel = collapsedTop; // distance between the two states
-        final fullSide = (size.width - 48).clamp(0.0, 380.0);
+        // Artwork side: capped by width AND by what the column below it needs
+        // (header/title/seek/controls/utility ≈ 420px) so the full player
+        // NEVER overflows on short screens — the art shrinks instead.
+        final fullSide = math.min(
+          (size.width - 48).clamp(0.0, 380.0),
+          (size.height - topInset - 420).clamp(140.0, 380.0),
+        );
 
         // Heavy subtrees are built ONCE here (per track/stream event). The
         // per-frame AnimatedBuilder below only repositions and re-fades these
@@ -81,6 +89,7 @@ class _PlayerSheetState extends State<PlayerSheet>
           ps: ps,
           track: track,
           topInset: topInset,
+          artSide: fullSide,
           onCollapse: () => _c.fling(velocity: -2.2),
         );
         final miniBar = _MiniBar(ps: ps, track: track);
@@ -98,8 +107,10 @@ class _PlayerSheetState extends State<PlayerSheet>
           ),
         );
         const miniRect = Rect.fromLTWH(8, 9, 44, 44);
+        // Lands 8px below the header row; the _FullPlayer placeholder brackets
+        // this rect exactly so artwork never overlaps title or controls.
         final fullRect = Rect.fromLTWH(
-            (size.width - fullSide) / 2, topInset + 76, fullSide, fullSide);
+            (size.width - fullSide) / 2, topInset + 56, fullSide, fullSide);
 
         return PopScope(
           canPop: !expanded,
@@ -110,6 +121,9 @@ class _PlayerSheetState extends State<PlayerSheet>
             animation: _c,
             builder: (context, _) {
               final top = collapsedTop * (1 - t);
+              // Collapsed, the sheet is ONLY the mini strip (the nav bar stays
+              // visible and tappable below it); expanded it fills the screen.
+              final bottom = widget.navHeight * (1 - t);
               final miniOpacity = (1 - t * 2.2).clamp(0.0, 1.0);
               final fullOpacity = ((t - 0.55) / 0.45).clamp(0.0, 1.0);
               final artRect =
@@ -120,7 +134,7 @@ class _PlayerSheetState extends State<PlayerSheet>
                     left: 0,
                     right: 0,
                     top: top,
-                    bottom: 0,
+                    bottom: bottom,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: t < 0.1 ? () => _c.fling(velocity: 2.2) : null,
@@ -297,17 +311,17 @@ class _FullPlayer extends StatelessWidget {
   final PlayerService ps;
   final Track track;
   final double topInset;
+  final double artSide; // must match the sheet's morph target rect
   final VoidCallback onCollapse;
   const _FullPlayer(
       {required this.ps,
       required this.track,
       required this.topInset,
+      required this.artSide,
       required this.onCollapse});
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final artSide = (size.width - 48).clamp(0.0, 380.0);
     return Padding(
       padding: EdgeInsets.only(top: topInset, left: 24, right: 24, bottom: 16),
       child: Column(
@@ -340,7 +354,7 @@ class _FullPlayer extends StatelessWidget {
               if (v < -300) ps.next();
               if (v > 300) ps.previousSmart();
             },
-            child: SizedBox(height: artSide + 12),
+            child: SizedBox(height: artSide + 16),
           ),
           Row(
             children: [

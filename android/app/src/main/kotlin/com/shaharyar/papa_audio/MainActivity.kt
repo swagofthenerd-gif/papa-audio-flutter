@@ -12,7 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Size
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
@@ -30,7 +30,10 @@ import java.util.concurrent.Executors
  *   queryTracks()              -> List<Map> (one per music file)
  *   getArt(trackId, albumId, size) -> ByteArray? (JPEG)
  */
-class MainActivity : FlutterActivity() {
+// AudioServiceActivity (extends FlutterActivity) hands the engine to
+// audio_service / just_audio_background — with a plain FlutterActivity the
+// audio plugin throws IllegalStateException and NOTHING ever plays.
+class MainActivity : AudioServiceActivity() {
     // Two workers: a burst of artwork requests while fling-scrolling a grid
     // shouldn't queue behind one long decode.
     private val executor = Executors.newFixedThreadPool(2)

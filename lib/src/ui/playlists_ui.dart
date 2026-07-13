@@ -6,6 +6,7 @@ import '../history.dart';
 import '../models.dart';
 import '../playlists.dart';
 import '../theme.dart';
+import 'collection_menu.dart';
 import 'dialogs.dart';
 import 'library_tab.dart';
 import 'selection_bar.dart';
@@ -54,6 +55,8 @@ class PlaylistsView extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                       builder: (_) => const _FavoritesScreen())),
+              onLongPress: () => showCollectionMenu(context,
+                  title: 'Liked Songs', tracks: s.playlists.favorites),
             ),
             ListTile(
               leading: Container(
@@ -94,6 +97,8 @@ class PlaylistsView extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                         builder: (_) => PlaylistScreen(playlist: p))),
+                onLongPress: () => showCollectionMenu(context,
+                    title: p.name, tracks: p.tracks),
               ),
           ],
         );

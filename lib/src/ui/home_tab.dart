@@ -10,6 +10,7 @@ import '../queues_store.dart';
 import '../theme.dart';
 import 'library_tab.dart';
 import 'playlists_ui.dart';
+import 'recently_added.dart';
 import 'settings_screen.dart';
 import 'widgets.dart';
 
@@ -65,8 +66,7 @@ class _HomeTabState extends State<HomeTab> {
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: _Header()),
-              SliverToBoxAdapter(
-                  child: _QuickPicks(state: s, recentlyAdded: recentlyAdded)),
+              SliverToBoxAdapter(child: _QuickPicks(state: s)),
               if (recent.isNotEmpty)
                 _Shelf(
                   title: 'Recently played',
@@ -82,6 +82,10 @@ class _HomeTabState extends State<HomeTab> {
               if (recentlyAdded.isNotEmpty)
                 _Shelf(
                   title: 'Recently added',
+                  onSeeAll: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const RecentlyAddedScreen())),
                   child: _LocalAlbumRow(albums: recentlyAdded),
                 ),
               if (s.playlists.playlists.isNotEmpty)
@@ -186,18 +190,13 @@ class _Header extends StatelessWidget {
 
 class _QuickPicks extends StatelessWidget {
   final AppState state;
-  final List<LocalAlbum> recentlyAdded; // shared with HomeTab — computed once
-  const _QuickPicks({required this.state, required this.recentlyAdded});
+  const _QuickPicks({required this.state});
 
   @override
   Widget build(BuildContext context) {
     final favs = state.playlists.favorites;
     final history = state.history.recentTracks(limit: 100);
     final most = state.history.mostPlayed(limit: 100).map((e) => e.$1).toList();
-    final added = recentlyAdded
-        .expand((a) => a.tracks)
-        .toList();
-
     final picks = <_Pick>[
       _Pick('Liked Songs', Icons.favorite, const [PA.accent, Color(0xFF0E5A2B)],
           () => _open(context, 'Liked Songs', favs)),
@@ -208,7 +207,10 @@ class _QuickPicks extends StatelessWidget {
           () => _open(context, 'Most played', most)),
       _Pick('Recently added', Icons.new_releases,
           const [Color(0xFF7A3FA0), Color(0xFF3A1E52)],
-          () => _open(context, 'Recently added', added)),
+          () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const RecentlyAddedScreen()))),
     ];
 
     return Padding(

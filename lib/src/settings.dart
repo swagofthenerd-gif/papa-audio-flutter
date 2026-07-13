@@ -32,6 +32,9 @@ class SettingsService extends ChangeNotifier {
   // What tapping a track does to the queue.
   TapMode tapMode = TapMode.list;
 
+  // Album grid density in the library (2 or 3 columns).
+  int gridColumns = 2;
+
   // Multi-value tag splitting (Artists / Genres tabs). Conservative defaults —
   // '&' and '/' split legitimate names too often, so they're opt-in.
   List<String> artistSeparators = [';', ' feat. ', ' ft. ', ' featuring '];
@@ -60,6 +63,7 @@ class SettingsService extends ChangeNotifier {
             .clamp(0, SwipeAction.values.length - 1)];
     tapMode = TapMode.values[(p.getInt('s.tapMode') ?? TapMode.list.index)
         .clamp(0, TapMode.values.length - 1)];
+    gridColumns = (p.getInt('s.gridColumns') ?? 2).clamp(2, 3);
     transitionFadeSec = p.getInt('s.transitionFadeSec') ?? 0;
     dynamicColors = p.getBool('s.dynamicColors') ?? true;
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
@@ -87,6 +91,7 @@ class SettingsService extends ChangeNotifier {
     p.setInt('s.swipeRight', swipeRight.index);
     p.setInt('s.swipeLeft', swipeLeft.index);
     p.setInt('s.tapMode', tapMode.index);
+    p.setInt('s.gridColumns', gridColumns);
     p.setInt('s.transitionFadeSec', transitionFadeSec);
     p.setBool('s.dynamicColors', dynamicColors);
     p.setStringList('s.artistSeps', artistSeparators);

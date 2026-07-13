@@ -165,6 +165,23 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
             ),
+            ListTile(
+              leading: const Icon(Icons.grid_view, color: PA.textSecondary),
+              title: const Text('Album grid columns'),
+              trailing: DropdownButton<int>(
+                value: st.gridColumns,
+                dropdownColor: PA.surfaceElevated,
+                underline: const SizedBox.shrink(),
+                style: const TextStyle(fontSize: 13, color: PA.text),
+                items: const [
+                  DropdownMenuItem(value: 2, child: Text('2 columns')),
+                  DropdownMenuItem(value: 3, child: Text('3 columns')),
+                ],
+                onChanged: (v) {
+                  if (v != null) st.update(() => st.gridColumns = v);
+                },
+              ),
+            ),
             const _Section('Tags'),
             ListTile(
               leading: const Icon(Icons.people_outline, color: PA.textSecondary),

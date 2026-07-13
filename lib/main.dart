@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'src/app_state.dart';
 import 'src/models.dart';
 import 'src/theme.dart';
+import 'src/ui/collection_menu.dart';
 import 'src/ui/downloads_tab.dart';
 import 'src/ui/home_tab.dart';
 import 'src/ui/library_tab.dart';
@@ -226,6 +227,8 @@ class AlbumCard extends StatelessWidget {
     return GestureDetector(
       onTap: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => AlbumScreen(album: album))),
+      onLongPress: () => showCollectionMenu(context,
+          title: album.name, tracks: album.tracks),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

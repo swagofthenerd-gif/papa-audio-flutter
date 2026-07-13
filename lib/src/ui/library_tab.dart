@@ -9,6 +9,7 @@ import '../models.dart';
 import '../player_service.dart';
 import '../text_norm.dart';
 import '../theme.dart';
+import 'collection_menu.dart';
 import 'playlists_ui.dart';
 import 'selection_bar.dart';
 import 'settings_screen.dart';
@@ -489,10 +490,11 @@ class _AlbumsView extends StatelessWidget {
           .toList();
     }
     if (albums.isEmpty) return const _Empty('No albums');
+    final columns = context.read<AppState>().settings.gridColumns;
     return GridView.builder(
       padding: const EdgeInsets.all(12),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
           childAspectRatio: 0.78,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12),
@@ -511,6 +513,8 @@ class _LocalAlbumCard extends StatelessWidget {
     return GestureDetector(
       onTap: () => Navigator.push(context,
           MaterialPageRoute(builder: (_) => LocalAlbumScreen(album: album))),
+      onLongPress: () => showCollectionMenu(context,
+          title: album.name, tracks: album.tracks),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -546,6 +550,19 @@ class LocalAlbumScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
+    // Multi-disc albums get "Disc N" section headers; single-disc albums stay
+    // a flat numbered list. Headers are ints, tracks keep their queue index.
+    final multiDisc = album.tracks.any((t) => t.discNumber > 1);
+    final items = <Object>[];
+    int? lastDisc;
+    for (var i = 0; i < album.tracks.length; i++) {
+      final t = album.tracks[i];
+      if (multiDisc && t.discNumber != lastDisc) {
+        lastDisc = t.discNumber;
+        items.add(t.discNumber);
+      }
+      items.add((i, t));
+    }
     return Scaffold(
       bottomNavigationBar: const SelectionBar(),
       body: CustomScrollView(
@@ -585,18 +602,37 @@ class LocalAlbumScreen extends StatelessWidget {
             ),
           ),
           SliverList.builder(
-            itemCount: album.tracks.length,
+            itemCount: items.length,
             itemBuilder: (_, i) {
-              final t = album.tracks[i];
+              final item = items[i];
+              if (item is int) {
+                // Disc header (only present on multi-disc albums).
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.album, size: 16, color: PA.textMuted),
+                      const SizedBox(width: 8),
+                      Text('Disc $item',
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: PA.textSecondary)),
+                    ],
+                  ),
+                );
+              }
+              final (idx, t) = item as (int, Track);
               return TrackTile(
                 track: t,
                 showArt: false,
                 leading: SizedBox(
                     width: 24,
                     child: Center(
-                        child: Text('${i + 1}',
+                        child: Text(
+                            '${multiDisc ? t.trackNumber : idx + 1}',
                             style: const TextStyle(color: PA.textMuted)))),
-                onTap: () => s.playTrackInList(album.tracks, i,
+                onTap: () => s.playTrackInList(album.tracks, idx,
                     collectionId: 'lalbum:${album.albumId}'),
               );
             },
@@ -702,6 +738,8 @@ class _ArtistsViewState extends State<_ArtistsView> {
                       title: name,
                       tracks: tracks,
                       collectionId: 'artist:$name'))),
+          onLongPress: () =>
+              showCollectionMenu(context, title: name, tracks: tracks),
         );
       },
     );
@@ -772,6 +810,8 @@ class _GenresViewState extends State<_GenresView> {
                       title: name,
                       tracks: tracks,
                       collectionId: 'genre:$name'))),
+          onLongPress: () =>
+              showCollectionMenu(context, title: name, tracks: tracks),
         );
       },
     );
@@ -849,6 +889,8 @@ class _FoldersViewState extends State<_FoldersView> {
                       title: name,
                       tracks: tracks,
                       collectionId: 'folder:$dir'))),
+          onLongPress: () =>
+              showCollectionMenu(context, title: name, tracks: tracks),
         );
       },
     );

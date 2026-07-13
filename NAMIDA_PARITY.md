@@ -37,16 +37,16 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Multi-select — long-press selects, tap toggles, bulk bar: play / play next / queue / add to playlist
 - [ ] Multi-select extras — range selection, bulk tag-edit and delete (W2)
 - [ ] Track deletion — delete file from device with confirm; keep a recently-deleted trail (W2)
-- [ ] Grid density — per-tab column count (1–4 or auto by screen width), persisted (W2)
+- [x] Grid density — album grid 2/3 columns, persisted (settings dropdown)
 - [ ] Library tabs editor — reorder/enable/disable tabs (min 2), default startup tab auto or fixed (W2)
 - [ ] Per-tab state — remembered scroll offset, per-tab filter field, re-tap active tab scrolls to top (W2)
 - [x] Sorting depth — year, real date-added, most-played, first-listen sort keys
 - [ ] Sorting extras — date-modified key, per-collection sort, ignore leading "The/A/An" (W2)
-- [ ] Albums vs singles split; multi-disc albums render separated disc sections (W2)
-- [ ] Collection long-press dialogs — album/artist/genre/folder summary with play/shuffle/queue/playlist actions (W2)
+- [x] Multi-disc albums render separated disc sections (albums-vs-singles split: not planned)
+- [x] Collection long-press dialogs — album/artist/genre/folder/playlist sheet with play/shuffle/play-next/queue/playlist actions
 - [ ] Subpage headers — artwork, counts + duration, play/shuffle with advanced modes (random N subset, insert next/after) (W2)
 - [ ] Subpage inline search — filter tracks inside album/artist/playlist pages (W2)
-- [ ] Recently added page — full list by date added with age labels (W2)
+- [x] Recently added page — full list by date added with age-group headers + labels
 - [ ] Folder tree mode — hierarchy navigation with breadcrumb, subfolder counts, default-folder bookmark, flat toggle (W2)
 - [x] Go to artist / Go to album — from the full player (tap title/artist) and every track menu; artist hub shows YouTube → PC → on-phone sections
 - [ ] Go-to folder, animated jump-to-track pill, "add more from this X" (W2)

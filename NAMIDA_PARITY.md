@@ -99,13 +99,13 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [ ] Pause at volume zero with timed auto-resume when volume returns (W2)
 - [ ] Repeat N times — repeat current track N times before advancing, live adjustable remaining count (W2)
 - [x] Queue-end behavior — optional "restart queue at the end" setting: jump to first, paused (infinite wrap: not planned)
-- [ ] Seek step config — fixed seconds or % of track; tap time labels to seek; hold to fast-forward/rewind (W2)
+- [x] Seek step config — hold-to-seek step selectable 5/10/15/30s (tap-time-labels seek: not planned)
 - [x] Track-tap play modes — whole list / single track / gentle insert-into-queue, in settings
 - [ ] Tap-mode extras — build queue from album / artist / genre of the tapped track (W2)
 - [ ] Play-error handling — cancellable 7s auto-skip countdown; rapid-skip debounce loads only the final target (W2)
 - [x] Per-collection resume — albums/artists/genres/folders/playlists remember index+position; Resume button on their screens
 - [ ] Restore last position for long tracks (configurable minimum duration) (W2)
-- [ ] Play-on-skip toggle — whether next/previous auto-plays while paused (W2)
+- [x] Play-on-skip toggle — next/previous starts playback while paused (settings)
 - [ ] Notification config — favorite and stop buttons, lockscreen-art toggle, configurable tap action (W2)
 - [ ] Kill-service policy — never / if-not-playing / always when the app is swiped away (W2)
 - [ ] Sleep-target marker — queue shows the track playback will sleep after (W2)
@@ -143,7 +143,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [ ] Queue slide-up layer — drag past the full player to reveal the queue sheet as a third snap state (W2)
 - [ ] Swipe-down to dismiss — stops playback and clears the queue, optional setting with elastic headroom (W2)
 - [ ] Audio info line — codec / bitrate / sample-rate readout in the expanded player (W2)
-- [ ] Display artist before title toggle (W2)
+- [x] Display artist before title toggle — track rows swap title/artist lines
 - [ ] Artwork gestures — configurable tap/long-press actions, pinch-to-zoom, double-tap toggles lyrics (W3)
 - [ ] Beat-reactive artwork pulse — waveform-driven scale with per-state intensity and inverse mode (W3)
 - [ ] Party mode — beat-synced edge glow around the screen, optional multi-color palette swapping (W3)
@@ -177,7 +177,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Day-grouped history — per-day play button, swipe-to-delete entries, debounced persistence
 - [x] Most played — ranked list with all / today / week / month / year ranges
 - [x] Configurable listen threshold — N seconds (capped at half the track), adjustable in settings
-- [ ] Percent-based listen threshold option (W2)
+- [x] Percent-based listen threshold option (settings toggle + percent slider)
 - [ ] Custom date range for most played with calendar picker constrained to days that have history (W2)
 - [x] Stats page — totals for tracks/albums/artists/genres, library duration, total listens, approx listen time (settings > Statistics)
 - [ ] Undo for history deletions (W2)

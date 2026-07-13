@@ -22,8 +22,19 @@ class SettingsService extends ChangeNotifier {
   /// Tint the expanded player with the current artwork's dominant color.
   bool dynamicColors = true;
 
-  // Listen counting
+  // Listen counting: fixed seconds, or a percentage of the track's duration.
   int listenSeconds = 20;
+  bool listenPercentMode = false;
+  int listenPercent = 20;
+
+  /// Skipping with next/previous while paused also starts playback.
+  bool playOnSkip = false;
+
+  /// Seconds jumped per hop while holding the prev/next transport buttons.
+  int holdSeekSec = 5;
+
+  /// Track tiles show "Artist" as the main line with the title beneath.
+  bool artistBeforeTitle = false;
 
   // Track tile swipes: what left/right swipe do (indices into SwipeAction).
   SwipeAction swipeRight = SwipeAction.playNext;
@@ -69,6 +80,11 @@ class SettingsService extends ChangeNotifier {
         .clamp(0, TapMode.values.length - 1)];
     gridColumns = (p.getInt('s.gridColumns') ?? 2).clamp(2, 3);
     queueEndRestart = p.getBool('s.queueEndRestart') ?? false;
+    listenPercentMode = p.getBool('s.listenPercentMode') ?? false;
+    listenPercent = (p.getInt('s.listenPercent') ?? 20).clamp(5, 90);
+    playOnSkip = p.getBool('s.playOnSkip') ?? false;
+    holdSeekSec = (p.getInt('s.holdSeekSec') ?? 5).clamp(1, 60);
+    artistBeforeTitle = p.getBool('s.artistBeforeTitle') ?? false;
     transitionFadeSec = p.getInt('s.transitionFadeSec') ?? 0;
     dynamicColors = p.getBool('s.dynamicColors') ?? true;
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
@@ -98,6 +114,11 @@ class SettingsService extends ChangeNotifier {
     p.setInt('s.tapMode', tapMode.index);
     p.setInt('s.gridColumns', gridColumns);
     p.setBool('s.queueEndRestart', queueEndRestart);
+    p.setBool('s.listenPercentMode', listenPercentMode);
+    p.setInt('s.listenPercent', listenPercent);
+    p.setBool('s.playOnSkip', playOnSkip);
+    p.setInt('s.holdSeekSec', holdSeekSec);
+    p.setBool('s.artistBeforeTitle', artistBeforeTitle);
     p.setInt('s.transitionFadeSec', transitionFadeSec);
     p.setBool('s.dynamicColors', dynamicColors);
     p.setStringList('s.artistSeps', artistSeparators);

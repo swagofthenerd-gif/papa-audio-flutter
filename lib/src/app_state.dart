@@ -93,6 +93,13 @@ class AppState extends ChangeNotifier {
       downloadsFuture,
     ]);
     history.listenSecondsProvider = () => settings.listenSeconds;
+    history.thresholdProvider = (t) {
+      if (settings.listenPercentMode && t.duration > 0) {
+        return t.duration * settings.listenPercent / 100;
+      }
+      final want = settings.listenSeconds.toDouble();
+      return t.duration > 0 ? want.clamp(0, t.duration * 0.5) : want;
+    };
     playerService.onNewQueue = queues.record;
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence(db);

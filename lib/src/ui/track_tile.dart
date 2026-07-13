@@ -116,6 +116,14 @@ class TrackTile extends StatelessWidget {
             animation: sel,
             builder: (context, _) {
           final selected = sel.active && sel.contains(track);
+          // Optional Namida-style swap: artist on the main line, title below.
+          final artistFirst =
+              context.read<AppState>().settings.artistBeforeTitle;
+          final titleText = artistFirst ? track.artist : track.title;
+          final subtitleText = subtitleOverride ??
+              (artistFirst
+                  ? '${track.title}${track.album != null ? ' · ${track.album}' : ''}'
+                  : '${track.artist}${track.album != null ? ' · ${track.album}' : ''}');
           return ListTile(
             selected: selected,
             selectedTileColor: PA.accent.withValues(alpha: 0.14),
@@ -132,7 +140,7 @@ class TrackTile extends StatelessWidget {
                             size: 44,
                             px: 120)
                         : null),
-            title: Text(track.title,
+            title: Text(titleText,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -140,9 +148,7 @@ class TrackTile extends StatelessWidget {
                     color: isCurrent ? PA.accent : PA.text,
                     fontWeight:
                         isCurrent ? FontWeight.w600 : FontWeight.normal)),
-            subtitle: Text(
-                subtitleOverride ??
-                    '${track.artist}${track.album != null ? ' · ${track.album}' : ''}',
+            subtitle: Text(subtitleText,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: PA.textSecondary, fontSize: 12)),

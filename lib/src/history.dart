@@ -19,6 +19,10 @@ class HistoryService extends ChangeNotifier {
   static const listenAfterSeconds = 20.0;
   int Function()? listenSecondsProvider;
 
+  /// When set, wins over [listenSecondsProvider]: returns the full threshold
+  /// in seconds for a given track (settings decide seconds vs percent mode).
+  double Function(Track)? thresholdProvider;
+
   final List<HistoryEntry> entries = []; // newest first (recent window)
   final Map<String, int> counts = {}; // track key → listens (all time)
   final Map<String, int> firstListen = {}; // track key → epoch ms of first listen
@@ -79,9 +83,14 @@ class HistoryService extends ChangeNotifier {
     }
     if (_counted) return;
     _accrued += 1;
-    final want = (listenSecondsProvider?.call() ?? listenAfterSeconds).toDouble();
-    final threshold =
-        t.duration > 0 ? want.clamp(0, t.duration * 0.5) : want;
+    final double threshold;
+    if (thresholdProvider != null) {
+      threshold = thresholdProvider!(t);
+    } else {
+      final want =
+          (listenSecondsProvider?.call() ?? listenAfterSeconds).toDouble();
+      threshold = t.duration > 0 ? want.clamp(0, t.duration * 0.5) : want;
+    }
     if (_accrued >= threshold) {
       _counted = true;
       _record(t);

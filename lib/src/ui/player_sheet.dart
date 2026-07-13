@@ -831,11 +831,13 @@ class _TransportControlsState extends State<TransportControls> {
     super.dispose();
   }
 
-  /// Holding prev/next scrubs the current track in ±5s hops, Namida-style.
-  void _startHoldSeek(int dirSec) {
+  /// Holding prev/next scrubs the current track in configurable hops,
+  /// Namida-style. [dir] is -1 (rewind) or 1 (fast-forward).
+  void _startHoldSeek(int dir) {
     _holdSeek?.cancel();
     void hop() {
-      final pos = ps.player.position + Duration(seconds: dirSec);
+      final step = ps.settings?.holdSeekSec ?? 5;
+      final pos = ps.player.position + Duration(seconds: dir * step);
       final max = ps.player.duration ?? Duration.zero;
       ps.player.seek(pos < Duration.zero
           ? Duration.zero
@@ -869,7 +871,7 @@ class _TransportControlsState extends State<TransportControls> {
           },
         ),
         GestureDetector(
-          onLongPressStart: (_) => _startHoldSeek(-5),
+          onLongPressStart: (_) => _startHoldSeek(-1),
           onLongPressEnd: (_) => _stopHoldSeek(),
           onLongPressCancel: _stopHoldSeek,
           child: IconButton(
@@ -905,7 +907,7 @@ class _TransportControlsState extends State<TransportControls> {
           },
         ),
         GestureDetector(
-          onLongPressStart: (_) => _startHoldSeek(5),
+          onLongPressStart: (_) => _startHoldSeek(1),
           onLongPressEnd: (_) => _stopHoldSeek(),
           onLongPressCancel: _stopHoldSeek,
           child: IconButton(

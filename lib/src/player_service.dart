@@ -400,16 +400,33 @@ class PlayerService {
       await Future.delayed(Duration(milliseconds: ms ~/ steps));
     }
   }
-  Future<void> next() => _player.seekToNext();
-  Future<void> previous() => _player.seekToPrevious();
+  Future<void> next() async {
+    await _player.seekToNext();
+    _maybePlayOnSkip();
+  }
+
+  Future<void> previous() async {
+    await _player.seekToPrevious();
+    _maybePlayOnSkip();
+  }
+
   Future<void> seek(Duration d) => _player.seek(d);
   Future<void> skipTo(int index) => _player.seek(Duration.zero, index: index);
 
   /// Namida-style previous: restart the track if it's already played a bit,
   /// only jump back when near the start.
-  Future<void> previousSmart() {
-    if (_player.position.inSeconds > 5) return _player.seek(Duration.zero);
-    return _player.seekToPrevious();
+  Future<void> previousSmart() async {
+    if (_player.position.inSeconds > 5) {
+      await _player.seek(Duration.zero);
+    } else {
+      await _player.seekToPrevious();
+    }
+    _maybePlayOnSkip();
+  }
+
+  /// Optional: skipping while paused starts playback.
+  void _maybePlayOnSkip() {
+    if ((settings?.playOnSkip ?? false) && !_player.playing) togglePlay();
   }
 
   Future<void> toggleShuffle() async {

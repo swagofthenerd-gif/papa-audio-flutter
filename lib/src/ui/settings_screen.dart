@@ -133,6 +133,40 @@ class SettingsScreen extends StatelessWidget {
             ),
             SwitchListTile(
               activeThumbColor: PA.accent,
+              secondary:
+                  const Icon(Icons.play_circle_outline, color: PA.textSecondary),
+              title: const Text('Play on skip'),
+              subtitle: const Text(
+                  'Next/previous starts playback even while paused',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.playOnSkip,
+              onChanged: (v) => st.update(() => st.playOnSkip = v),
+            ),
+            ListTile(
+              leading: const Icon(Icons.fast_forward_outlined,
+                  color: PA.textSecondary),
+              title: const Text('Hold-to-seek step'),
+              subtitle: const Text(
+                  'Jump size while holding next/previous',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              trailing: DropdownButton<int>(
+                value: st.holdSeekSec,
+                dropdownColor: PA.surfaceElevated,
+                underline: const SizedBox.shrink(),
+                style: const TextStyle(fontSize: 13, color: PA.text),
+                items: const [
+                  DropdownMenuItem(value: 5, child: Text('5s')),
+                  DropdownMenuItem(value: 10, child: Text('10s')),
+                  DropdownMenuItem(value: 15, child: Text('15s')),
+                  DropdownMenuItem(value: 30, child: Text('30s')),
+                ],
+                onChanged: (v) {
+                  if (v != null) st.update(() => st.holdSeekSec = v);
+                },
+              ),
+            ),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
               secondary: const Icon(Icons.restart_alt, color: PA.textSecondary),
               title: const Text('Restart queue at the end'),
               subtitle: const Text(
@@ -151,11 +185,23 @@ class SettingsScreen extends StatelessWidget {
               onChanged: (v) => st.update(() => st.linkSpeedPitch = v),
             ),
             const _Section('Library'),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
+              secondary: const Icon(Icons.percent, color: PA.textSecondary),
+              title: const Text('Count listens by percent'),
+              subtitle: const Text(
+                  'Threshold as a share of the track instead of fixed seconds',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.listenPercentMode,
+              onChanged: (v) => st.update(() => st.listenPercentMode = v),
+            ),
             ListTile(
               leading: const Icon(Icons.timer_outlined, color: PA.textSecondary),
               title: const Text('Count a listen after'),
               subtitle: Text(
-                  '${st.listenSeconds}s of playback (or half the track if shorter)',
+                  st.listenPercentMode
+                      ? '${st.listenPercent}% of the track'
+                      : '${st.listenSeconds}s of playback (or half the track if shorter)',
                   style: const TextStyle(color: PA.textMuted, fontSize: 12)),
             ),
             Padding(
@@ -166,15 +212,37 @@ class SettingsScreen extends StatelessWidget {
                   inactiveTrackColor: PA.card,
                   thumbColor: Colors.white,
                 ),
-                child: Slider(
-                  min: 5,
-                  max: 60,
-                  divisions: 11,
-                  label: '${st.listenSeconds}s',
-                  value: st.listenSeconds.toDouble(),
-                  onChanged: (v) => st.update(() => st.listenSeconds = v.round()),
-                ),
+                child: st.listenPercentMode
+                    ? Slider(
+                        min: 5,
+                        max: 90,
+                        divisions: 17,
+                        label: '${st.listenPercent}%',
+                        value: st.listenPercent.toDouble(),
+                        onChanged: (v) =>
+                            st.update(() => st.listenPercent = v.round()),
+                      )
+                    : Slider(
+                        min: 5,
+                        max: 60,
+                        divisions: 11,
+                        label: '${st.listenSeconds}s',
+                        value: st.listenSeconds.toDouble(),
+                        onChanged: (v) =>
+                            st.update(() => st.listenSeconds = v.round()),
+                      ),
               ),
+            ),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
+              secondary:
+                  const Icon(Icons.swap_vert, color: PA.textSecondary),
+              title: const Text('Artist before title'),
+              subtitle: const Text(
+                  'Track rows show the artist on the main line',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.artistBeforeTitle,
+              onChanged: (v) => st.update(() => st.artistBeforeTitle = v),
             ),
             ListTile(
               leading: const Icon(Icons.query_stats, color: PA.textSecondary),

@@ -69,9 +69,9 @@ emulator, build + push + drop the APK on the Desktop, then start the next.
   high-refresh-rate request. Channel: queryTracks/getArt/getWaveform/
   hasPermission/requestPermission (requestPermission must hop to main handler).
 
-## State at handoff (commit `e9b1680`, all pushed, APK on Desktop)
+## State at handoff (commit `3c191c5`, all pushed, APK on Desktop)
 
-~80/242 parity items done. Waves A–D all shipped and device-verified
+~83/242 parity items done. Waves A–E all shipped and device-verified
 (2026-07-13 session):
 
 - **Wave A** (`13db88a`): collection long-press menus wired everywhere
@@ -91,15 +91,25 @@ emulator, build + push + drop the APK on the Desktop, then start the next.
   threshold (settings.listenPercentMode + listenPercent, wired via
   history.thresholdProvider in app_state), settings.artistBeforeTitle
   (TrackTile swaps title/artist lines).
-- Next: continue down NAMIDA_PARITY.md unchecked W2 items (playlist
-  remove-duplicates with count, history-deletion undo, lastListen sort
-  key/tile badges, folder tree mode, per-tab state, global search overlay,
-  track deletion, interruption handling…), then W3 (tag editor, M3U, smart
+- **Wave E** (`3c191c5`): PlaylistsService.removeDuplicates (+ overflow
+  menu item with count snackbar), history swipe-delete Undo
+  (HistoryService.restoreEntry), TrackSort.lastListen. Dedupe + undo
+  device-verified; lastListen sort analyzer/tests-only (emulator kept
+  crashing — see below). **Next session: spot-check the "Last listen"
+  sort menu option on-device first.**
+- Next: continue down NAMIDA_PARITY.md unchecked W2 items (folder tree
+  mode, per-tab state, global search overlay, track deletion, interruption
+  handling, shuffle-behavior setting…), then W3 (tag editor, M3U, smart
   playlists, history calendar, lyrics fullscreen…).
 
-Emulator quirk seen this session: it can silently die mid-session (adb
-"device offline" → no devices). Restart with the Start-Process recipe above
-and re-grant nothing (data persists).
+Emulator quirks seen this session: it silently dies mid-session (adb
+"device offline"/"error: closed" → no devices) — happened 4+ times, more
+frequent late in the session; restart with the Start-Process recipe above
+(data persists, no re-granting needed). A stray Android "Try out your
+stylus" system dialog once swallowed taps — dismiss via its Cancel button.
+`adb shell input keyevent 4` (back) exits the app from its root screen;
+prefer `am start -n com.shaharyar.papa_audio/.MainActivity` to relaunch
+(monkey sometimes races the shade).
 
 ## Verification recipe per wave
 

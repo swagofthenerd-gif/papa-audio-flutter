@@ -31,6 +31,7 @@ class _HomeTabState extends State<HomeTab> {
   // (Perf audit finding.)
   List<Track> _recent = const [];
   List<Track> _top = const [];
+  List<Track> _rediscover = const [];
   List<LocalAlbum> _recentlyAdded = const [];
   String _sig = '';
 
@@ -40,6 +41,7 @@ class _HomeTabState extends State<HomeTab> {
     _sig = sig;
     _recent = s.history.recentTracks(limit: 20);
     _top = s.history.mostPlayed(limit: 20).map((e) => e.$1).toList();
+    _rediscover = s.history.rediscover();
     _recentlyAdded = _recentlyAddedAlbums(s.localLibrary);
   }
 
@@ -78,6 +80,13 @@ class _HomeTabState extends State<HomeTab> {
                   title: 'Your top tracks',
                   onSeeAll: () => _openTracks(context, 'Your top tracks', top),
                   child: _TrackRow(tracks: top),
+                ),
+              if (_rediscover.isNotEmpty)
+                _Shelf(
+                  title: 'Rediscover',
+                  onSeeAll: () =>
+                      _openTracks(context, 'Rediscover', _rediscover),
+                  child: _TrackRow(tracks: _rediscover),
                 ),
               if (recentlyAdded.isNotEmpty)
                 _Shelf(

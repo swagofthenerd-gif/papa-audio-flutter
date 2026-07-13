@@ -53,7 +53,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] A–Z letter rail — drag or tap to jump alphabetically sorted track lists, with letter bubble
 - [ ] Track info depth — every tag field tappable-to-copy, format block, isolated preview player that pauses main playback (W2)
 - [ ] Library refresh — pull-to-refresh diff rescan, refresh-on-startup option, full re-index with live progress (W2)
-- [ ] Home tab — feed of mixes, recent/top listens, lost memories, recently added, recent queues/albums/artists (W3)
+- [x] Home tab — recent/top listens, Rediscover (lost memories), recently added, playlists, recent queues/albums shelves (mixes: not planned)
 - [ ] Track tile layout editor — configurable rows/fields (~30 fields), separator, sizes, inline heart (W3)
 - [ ] Moods / Tags / Rating tabs backed by per-track stats (W3)
 - [ ] Indexer config — folder include/exclude, min size/duration, extension blacklist, .nomedia, duplicate prevention (W4)
@@ -179,7 +179,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Configurable listen threshold — N seconds (capped at half the track), adjustable in settings
 - [ ] Percent-based listen threshold option (W2)
 - [ ] Custom date range for most played with calendar picker constrained to days that have history (W2)
-- [ ] Stats page — totals for tracks/albums/artists/genres, library duration, accumulated listen time (W2)
+- [x] Stats page — totals for tracks/albums/artists/genres, library duration, total listens, approx listen time (settings > Statistics)
 - [ ] Undo for history deletions (W2)
 - [ ] Listen-based tile data — listen count, first/last listen dates as sort keys and tile badges (W2)
 - [ ] Jump-to-day dialog + pinned year chips for fast history navigation (W3)

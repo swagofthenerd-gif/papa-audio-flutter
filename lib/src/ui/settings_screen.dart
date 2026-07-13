@@ -6,6 +6,7 @@ import '../settings.dart';
 import '../theme.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
+import 'stats_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -174,6 +175,14 @@ class SettingsScreen extends StatelessWidget {
                   onChanged: (v) => st.update(() => st.listenSeconds = v.round()),
                 ),
               ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.query_stats, color: PA.textSecondary),
+              title: const Text('Statistics'),
+              subtitle: const Text('Library size and listening totals',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              onTap: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const StatsScreen())),
             ),
             ListTile(
               leading: const Icon(Icons.grid_view, color: PA.textSecondary),

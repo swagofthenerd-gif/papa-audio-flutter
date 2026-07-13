@@ -22,6 +22,7 @@ class HistoryService extends ChangeNotifier {
   final List<HistoryEntry> entries = []; // newest first (recent window)
   final Map<String, int> counts = {}; // track key → listens (all time)
   final Map<String, int> firstListen = {}; // track key → epoch ms of first listen
+  final Map<String, int> lastListen = {}; // track key → epoch ms of latest listen
   final Map<String, Track> _byKey = {}; // latest Track snapshot per key
 
   /// Bumped on any content change — lets views memoize derived structures
@@ -37,7 +38,8 @@ class HistoryService extends ChangeNotifier {
       final rows = await db.db.query('history',
           orderBy: 'id DESC', limit: _memoryCap);
       final agg = await db.db.rawQuery(
-          'SELECT track_key, COUNT(*) c, MIN(at) first_at FROM history GROUP BY track_key');
+          'SELECT track_key, COUNT(*) c, MIN(at) first_at, MAX(at) last_at '
+          'FROM history GROUP BY track_key');
       final snaps = await db.db.rawQuery(
           'SELECT h.track_key, h.track_json FROM history h '
           'INNER JOIN (SELECT track_key k, MAX(id) m FROM history GROUP BY track_key) x '
@@ -49,11 +51,13 @@ class HistoryService extends ChangeNotifier {
       for (final r in agg) {
         counts[r['track_key'] as String] = r['c'] as int;
         firstListen[r['track_key'] as String] = r['first_at'] as int;
+        lastListen[r['track_key'] as String] = r['last_at'] as int;
       }
     } catch (_) {
       entries.clear();
       counts.clear();
       firstListen.clear();
+      lastListen.clear();
     }
     revision++;
     notifyListeners();
@@ -88,6 +92,7 @@ class HistoryService extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     counts.update(t.key, (n) => n + 1, ifAbsent: () => 1);
     firstListen.putIfAbsent(t.key, () => now);
+    lastListen[t.key] = now;
     _byKey[t.key] = t;
     int? dbId;
     try {
@@ -122,6 +127,7 @@ class HistoryService extends ChangeNotifier {
     entries.clear();
     counts.clear();
     firstListen.clear();
+    lastListen.clear();
     _byKey.clear();
     try {
       await _db?.db.delete('history');
@@ -153,6 +159,20 @@ class HistoryService extends ChangeNotifier {
       for (final e in sorted.take(limit))
         if (_byKey[e.key] != null) (_byKey[e.key]!, e.value),
     ];
+  }
+
+  /// "Rediscover": tracks you used to listen to but haven't touched lately —
+  /// last listen older than [olderThanDays], ordered by all-time count desc.
+  List<Track> rediscover({int olderThanDays = 30, int limit = 20}) {
+    final cutoff = DateTime.now()
+        .subtract(Duration(days: olderThanDays))
+        .millisecondsSinceEpoch;
+    final keyed = <(int, Track)>[
+      for (final e in lastListen.entries)
+        if (e.value < cutoff && _byKey[e.key] != null)
+          (counts[e.key] ?? 0, _byKey[e.key]!)
+    ]..sort((a, b) => b.$1.compareTo(a.$1));
+    return [for (final k in keyed.take(limit)) k.$2];
   }
 
   /// History as distinct recent tracks (dedup keeps the newest occurrence).

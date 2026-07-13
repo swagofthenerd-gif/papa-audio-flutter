@@ -149,6 +149,15 @@ class PlaylistScreen extends StatelessWidget {
                       final name = await promptText(
                           context, 'Rename playlist', playlist.name);
                       if (name != null) await s.playlists.rename(playlist, name);
+                    case 'dedupe':
+                      final n = await s.playlists.removeDuplicates(playlist);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(n == 0
+                                ? 'No duplicates found'
+                                : 'Removed $n duplicate${n == 1 ? '' : 's'}'),
+                            duration: const Duration(milliseconds: 1400)));
+                      }
                     case 'delete':
                       await s.playlists.delete(playlist);
                       if (context.mounted) Navigator.pop(context);
@@ -156,6 +165,8 @@ class PlaylistScreen extends StatelessWidget {
                 },
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: 'rename', child: Text('Rename')),
+                  PopupMenuItem(
+                      value: 'dedupe', child: Text('Remove duplicates')),
                   PopupMenuItem(value: 'delete', child: Text('Delete')),
                 ],
               ),
@@ -416,7 +427,21 @@ class _HistoryViewState extends State<HistoryView> {
                 padding: const EdgeInsets.only(right: 20),
                 child: const Icon(Icons.delete, color: Colors.white),
               ),
-              onDismissed: (_) => s.history.removeEntry(e),
+              onDismissed: (_) {
+                s.history.removeEntry(e);
+                ScaffoldMessenger.of(context)
+                  ..clearSnackBars()
+                  ..showSnackBar(SnackBar(
+                    content: Text('Removed ${e.track.title} from history',
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    duration: const Duration(seconds: 3),
+                    action: SnackBarAction(
+                      label: 'Undo',
+                      textColor: PA.accent,
+                      onPressed: () => s.history.restoreEntry(e),
+                    ),
+                  ));
+              },
               child: TrackTile(
                 track: e.track,
                 swipeActions: false,

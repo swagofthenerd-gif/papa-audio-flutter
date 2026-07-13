@@ -160,6 +160,19 @@ class PlaylistsService extends ChangeNotifier {
     await _rewriteTracks(p);
   }
 
+  /// Keeps the first occurrence of each track; returns how many rows left.
+  Future<int> removeDuplicates(Playlist p) async {
+    final seen = <String>{};
+    final before = p.tracks.length;
+    p.tracks.retainWhere((t) => seen.add(t.key));
+    final removed = before - p.tracks.length;
+    if (removed == 0) return 0;
+    p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+    await _rewriteTracks(p);
+    return removed;
+  }
+
   Future<void> reorder(Playlist p, int from, int to) async {
     if (from < 0 || from >= p.tracks.length) return;
     final t = p.tracks.removeAt(from);

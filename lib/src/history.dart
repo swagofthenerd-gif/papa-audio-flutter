@@ -132,6 +132,30 @@ class HistoryService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Undo for [removeEntry]: re-inserts the row (new DB id) at its original
+  /// chronological position and restores the aggregate maps.
+  Future<void> restoreEntry(HistoryEntry e) async {
+    int? dbId;
+    try {
+      dbId = await _db?.db.insert('history', {
+        'at': e.at,
+        'track_key': e.track.key,
+        'track_json': jsonEncode(e.track.toJson()),
+      });
+    } catch (_) {}
+    final restored = HistoryEntry(dbId: dbId, track: e.track, at: e.at);
+    final idx = entries.indexWhere((x) => x.at <= e.at); // newest-first list
+    entries.insert(idx < 0 ? entries.length : idx, restored);
+    counts.update(e.track.key, (n) => n + 1, ifAbsent: () => 1);
+    final f = firstListen[e.track.key];
+    if (f == null || e.at < f) firstListen[e.track.key] = e.at;
+    final l = lastListen[e.track.key];
+    if (l == null || e.at > l) lastListen[e.track.key] = e.at;
+    _byKey[e.track.key] = e.track;
+    revision++;
+    notifyListeners();
+  }
+
   Future<void> clear() async {
     entries.clear();
     counts.clear();

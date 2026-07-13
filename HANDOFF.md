@@ -69,34 +69,37 @@ emulator, build + push + drop the APK on the Desktop, then start the next.
   high-refresh-rate request. Channel: queryTracks/getArt/getWaveform/
   hasPermission/requestPermission (requestPermission must hop to main handler).
 
-## State at handoff (commit `112ef9d` + WIP commit on top)
+## State at handoff (commit `e9b1680`, all pushed, APK on Desktop)
 
-~72/242 parity items done. Working tree at handoff contains **Wave A partial
-work (analyzer-clean, committed as WIP, NOT device-verified yet)**:
+~80/242 parity items done. Waves A–D all shipped and device-verified
+(2026-07-13 session):
 
-- DONE (in WIP commit): `ui/collection_menu.dart` (bulk Play/Shuffle/Play next/
-  Queue/Add-to-playlist sheet — **not wired anywhere yet**),
-  `ui/recently_added.dart` (age-grouped screen — **not wired yet**),
-  TrackListScreen inline search (app-bar search icon → filter field).
-- REMAINING Wave A: wire `showCollectionMenu` as onLongPress on: _LocalAlbumCard,
-  artist/genre/folder ListTiles (library_tab), AlbumCard (main.dart), playlist
-  tiles (playlists_ui); add disc-section headers in LocalAlbumScreen when
-  discNumber>1 exists (flatten headers+tracks); album-grid column setting
-  (settings.gridColumns 2/3 + dropdown in settings_screen + use in _AlbumsView);
-  route Home quick-pick "Recently added" + shelf See-all → RecentlyAddedScreen.
-- Wave B (planned): queue-end behavior setting (on completed+LoopMode.off →
-  seek to first, paused); hold prev/next to seek repeatedly (TransportControls
-  → stateful, long-press timer ±5s/250ms); queue-sheet menu item
-  "remove all except current" (`_removeWhere((i,_) => i != currentIndex)`).
-- Wave C (planned): add MAX(at) to history init GROUP BY → lastListen map +
-  update on record; Home "Rediscover" shelf (listened before, lastListen >30d,
-  by count desc, hidden when empty); stats screen (tracks/albums/artists counts,
-  library duration, total listens, approx listening time = Σ count×duration)
-  reachable from settings.
-- Then continue down NAMIDA_PARITY.md unchecked W2 items (folder tree mode,
-  per-tab state, global search overlay, track deletion, interruption handling,
-  queue undo extras…), then W3 (tag editor, M3U, smart playlists, history
-  calendar, lyrics fullscreen…).
+- **Wave A** (`13db88a`): collection long-press menus wired everywhere
+  (local album cards, artist/genre/folder tiles, PC AlbumCard, playlist +
+  Liked Songs tiles), disc-section headers in LocalAlbumScreen,
+  settings.gridColumns (2/3) applied in _AlbumsView, Recently-added screen
+  routed from Home quick-pick + shelf See-all.
+- **Wave B** (`91b7341`): settings.queueEndRestart (completed+LoopMode.off →
+  seek index 0, paused — listener in PlayerService ctor), hold prev/next
+  scrubs ±holdSeekSec per 250ms (TransportControls now stateful),
+  removeAllExceptCurrent in queue-sheet overflow.
+- **Wave C** (`721c865`): history.lastListen map (MAX(at) init + updates),
+  history.rediscover() → Home "Rediscover" shelf (>30d, count desc, hidden
+  when empty), StatsScreen at settings → Statistics.
+- **Wave D** (`e9b1680`): settings.playOnSkip (skip while paused plays),
+  settings.holdSeekSec dropdown (5/10/15/30s), percent-based listen
+  threshold (settings.listenPercentMode + listenPercent, wired via
+  history.thresholdProvider in app_state), settings.artistBeforeTitle
+  (TrackTile swaps title/artist lines).
+- Next: continue down NAMIDA_PARITY.md unchecked W2 items (playlist
+  remove-duplicates with count, history-deletion undo, lastListen sort
+  key/tile badges, folder tree mode, per-tab state, global search overlay,
+  track deletion, interruption handling…), then W3 (tag editor, M3U, smart
+  playlists, history calendar, lyrics fullscreen…).
+
+Emulator quirk seen this session: it can silently die mid-session (adb
+"device offline" → no devices). Restart with the Start-Process recipe above
+and re-grant nothing (data persists).
 
 ## Verification recipe per wave
 

@@ -16,7 +16,7 @@ import 'settings_screen.dart';
 import 'track_tile.dart';
 import 'widgets.dart';
 
-enum TrackSort { title, artist, album, year, dateAdded, duration, mostPlayed, firstListen }
+enum TrackSort { title, artist, album, year, dateAdded, duration, mostPlayed, firstListen, lastListen }
 
 /// On-phone library, Namida-style breadth in Spotify clothes: chip tabs for
 /// Tracks / Albums / Artists / Folders / Playlists / History / Most Played,
@@ -192,6 +192,7 @@ class _LibraryTabState extends State<LibraryTab>
               (TrackSort.duration, 'Duration'),
               (TrackSort.mostPlayed, 'Most played'),
               (TrackSort.firstListen, 'First listen'),
+              (TrackSort.lastListen, 'Last listen'),
             ])
               ListTile(
                 dense: true,
@@ -271,7 +272,8 @@ class _TracksViewState extends State<_TracksView>
   void _recompute(AppState s) {
     // History-based sorts also refresh when listen data changes.
     final historyBased = widget.sort == TrackSort.mostPlayed ||
-        widget.sort == TrackSort.firstListen;
+        widget.sort == TrackSort.firstListen ||
+        widget.sort == TrackSort.lastListen;
     final sig =
         '${widget.query}|${widget.sort.index}|${widget.reverse}|${widget.lib.revision}'
         '${historyBased ? '|${s.history.revision}' : ''}';
@@ -409,6 +411,9 @@ class _TracksViewState extends State<_TracksView>
         TrackSort.firstListen => (a, b) =>
             (s.history.firstListen[a.key] ?? 1 << 62)
                 .compareTo(s.history.firstListen[b.key] ?? 1 << 62),
+        // Most recently heard first; never-heard tracks sink to the bottom.
+        TrackSort.lastListen => (a, b) => (s.history.lastListen[b.key] ?? 0)
+            .compareTo(s.history.lastListen[a.key] ?? 0),
       };
 }
 

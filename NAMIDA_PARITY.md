@@ -98,7 +98,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [ ] Resume on device connect — separate wired and Bluetooth thresholds (W2)
 - [ ] Pause at volume zero with timed auto-resume when volume returns (W2)
 - [ ] Repeat N times — repeat current track N times before advancing, live adjustable remaining count (W2)
-- [ ] Queue-end behavior — jump to first after finish; infinite wrap on next/previous (W2)
+- [x] Queue-end behavior — optional "restart queue at the end" setting: jump to first, paused (infinite wrap: not planned)
 - [ ] Seek step config — fixed seconds or % of track; tap time labels to seek; hold to fast-forward/rewind (W2)
 - [x] Track-tap play modes — whole list / single track / gentle insert-into-queue, in settings
 - [ ] Tap-mode extras — build queue from album / artist / genre of the tapped track (W2)
@@ -139,7 +139,7 @@ Checked items are already shipped in Papa Audio (Wave 1). Every unchecked item c
 - [x] Waveform seekbar — real PCM-decoded amplitude bars (cached in SQLite), tap/drag to scrub, slider fallback for streams
 - [ ] Waveform extras — drag-up-to-cancel, seek-delta bubble (W2)
 - [ ] Seek display options — remaining-time toggle, absolute vs +/- delta while scrubbing (W2)
-- [ ] Long-press transport — hold next for temporary speed-up, long-press previous restarts (W2)
+- [x] Long-press transport — hold prev/next scrubs the track in ±5s hops every 250ms
 - [ ] Queue slide-up layer — drag past the full player to reveal the queue sheet as a third snap state (W2)
 - [ ] Swipe-down to dismiss — stops playback and clears the queue, optional setting with elastic headroom (W2)
 - [ ] Audio info line — codec / bitrate / sample-rate readout in the expanded player (W2)

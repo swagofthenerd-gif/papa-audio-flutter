@@ -49,6 +49,17 @@ class PlayerService {
       _transitionFadeOnTick();
       if (++_posTicks % 5 == 0) _savePosition();
     });
+    // Optional queue-end behavior: instead of stopping on the last track,
+    // return to the top of the queue, paused and ready to play again.
+    _player.processingStateStream.listen((st) async {
+      if (st == ProcessingState.completed &&
+          _player.loopMode == LoopMode.off &&
+          (settings?.queueEndRestart ?? false) &&
+          _queue.isNotEmpty) {
+        await _player.pause();
+        await _player.seek(Duration.zero, index: 0);
+      }
+    });
     // Chained play-next resets once playback moves to a new track; when
     // transition fades are on, each new track opens with a short fade-in.
     _player.currentIndexStream.listen((_) {
@@ -218,6 +229,11 @@ class PlayerService {
   Future<int> removeAllNext() async {
     final current = _player.currentIndex ?? 0;
     return _removeWhere((i, _) => i > current);
+  }
+
+  Future<int> removeAllExceptCurrent() async {
+    final current = _player.currentIndex ?? 0;
+    return _removeWhere((i, _) => i != current);
   }
 
   Future<int> _removeWhere(bool Function(int, Track) test) async {

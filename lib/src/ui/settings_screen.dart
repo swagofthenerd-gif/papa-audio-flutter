@@ -132,6 +132,16 @@ class SettingsScreen extends StatelessWidget {
             ),
             SwitchListTile(
               activeThumbColor: PA.accent,
+              secondary: const Icon(Icons.restart_alt, color: PA.textSecondary),
+              title: const Text('Restart queue at the end'),
+              subtitle: const Text(
+                  'When the queue finishes, return to the first track (paused)',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.queueEndRestart,
+              onChanged: (v) => st.update(() => st.queueEndRestart = v),
+            ),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
               secondary: const Icon(Icons.link, color: PA.textSecondary),
               title: const Text('Link speed & pitch'),
               subtitle: const Text('Changing speed also shifts pitch',

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -812,9 +813,44 @@ class _WaveformPainter extends CustomPainter {
       old.progress != progress || !identical(old.bars, bars);
 }
 
-class TransportControls extends StatelessWidget {
+class TransportControls extends StatefulWidget {
   final PlayerService ps;
   const TransportControls({super.key, required this.ps});
+
+  @override
+  State<TransportControls> createState() => _TransportControlsState();
+}
+
+class _TransportControlsState extends State<TransportControls> {
+  PlayerService get ps => widget.ps;
+  Timer? _holdSeek;
+
+  @override
+  void dispose() {
+    _holdSeek?.cancel();
+    super.dispose();
+  }
+
+  /// Holding prev/next scrubs the current track in ±5s hops, Namida-style.
+  void _startHoldSeek(int dirSec) {
+    _holdSeek?.cancel();
+    void hop() {
+      final pos = ps.player.position + Duration(seconds: dirSec);
+      final max = ps.player.duration ?? Duration.zero;
+      ps.player.seek(pos < Duration.zero
+          ? Duration.zero
+          : (max > Duration.zero && pos > max ? max : pos));
+    }
+
+    hop();
+    _holdSeek =
+        Timer.periodic(const Duration(milliseconds: 250), (_) => hop());
+  }
+
+  void _stopHoldSeek() {
+    _holdSeek?.cancel();
+    _holdSeek = null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -832,10 +868,15 @@ class TransportControls extends StatelessWidget {
             );
           },
         ),
-        IconButton(
-          icon: const Icon(Icons.skip_previous, size: 38),
-          color: Colors.white,
-          onPressed: ps.previousSmart,
+        GestureDetector(
+          onLongPressStart: (_) => _startHoldSeek(-5),
+          onLongPressEnd: (_) => _stopHoldSeek(),
+          onLongPressCancel: _stopHoldSeek,
+          child: IconButton(
+            icon: const Icon(Icons.skip_previous, size: 38),
+            color: Colors.white,
+            onPressed: ps.previousSmart,
+          ),
         ),
         StreamBuilder<PlayerState>(
           stream: ps.playerState,
@@ -863,10 +904,15 @@ class TransportControls extends StatelessWidget {
             );
           },
         ),
-        IconButton(
-          icon: const Icon(Icons.skip_next, size: 38),
-          color: Colors.white,
-          onPressed: ps.next,
+        GestureDetector(
+          onLongPressStart: (_) => _startHoldSeek(5),
+          onLongPressEnd: (_) => _stopHoldSeek(),
+          onLongPressCancel: _stopHoldSeek,
+          child: IconButton(
+            icon: const Icon(Icons.skip_next, size: 38),
+            color: Colors.white,
+            onPressed: ps.next,
+          ),
         ),
         StreamBuilder<LoopMode>(
           stream: ps.loopMode,
@@ -961,6 +1007,7 @@ class _QueueSheetState extends State<_QueueSheet> {
                             'dups' => await ps.removeDuplicates(),
                             'prev' => await ps.removeAllPrevious(),
                             'next' => await ps.removeAllNext(),
+                            'except' => await ps.removeAllExceptCurrent(),
                             _ => 0,
                           };
                           if (context.mounted) {
@@ -977,6 +1024,9 @@ class _QueueSheetState extends State<_QueueSheet> {
                               child: Text('Remove all previous')),
                           PopupMenuItem(
                               value: 'next', child: Text('Remove all next')),
+                          PopupMenuItem(
+                              value: 'except',
+                              child: Text('Remove all except current')),
                         ],
                       ),
                     ],

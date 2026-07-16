@@ -339,18 +339,20 @@ class _QuickPicks extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final favs = state.playlists.favorites;
+    final s = state;
+    final favs = s.playlists.favorites;
+    final history = s.history.recentTracks(limit: 100);
+    final most = s.history.mostPlayed(limit: 100).map((e) => e.$1).toList();
     final picks = <_Pick>[
-      _Pick('Liked Songs', Icons.favorite, const [PA.accent, Color(0xFF0E5A2B)],
+      _Pick('Liked Songs', Icons.favorite, PA.accent, favs,
           () => _open(context, 'Liked Songs', favs)),
-      _Pick('History', Icons.history, const [Color(0xFF3A5BA0), Color(0xFF1E2E52)],
-          () => _open(context, 'History', state.history.recentTracks(limit: 100))),
+      _Pick('History', Icons.history, const Color(0xFF3A5BA0), history,
+          () => _open(context, 'History', history)),
       _Pick('Most played', Icons.local_fire_department,
-          const [Color(0xFFB5442A), Color(0xFF5A2015)],
-          () => _open(context, 'Most played',
-              state.history.mostPlayed(limit: 100).map((e) => e.$1).toList())),
-      _Pick('Recently added', Icons.new_releases,
-          const [Color(0xFF7A3FA0), Color(0xFF3A1E52)],
+          const Color(0xFFB5442A), most,
+          () => _open(context, 'Most played', most)),
+      _Pick('Recently added', Icons.new_releases, const Color(0xFF7A3FA0),
+          const [],
           () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => const RecentlyAddedScreen()))),
     ];
@@ -364,7 +366,7 @@ class _QuickPicks extends StatelessWidget {
         childAspectRatio: 2.9,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
-        children: [for (final p in picks) _PickTile(pick: p)],
+        children: [for (final p in picks) _PickTile(pick: p, state: s)],
       ),
     );
   }
@@ -378,44 +380,67 @@ class _QuickPicks extends StatelessWidget {
 class _Pick {
   final String label;
   final IconData icon;
-  final List<Color> gradient;
+  final Color color;
+  final List<Track> tracks; // for the art thumbnail + 1-tap shuffle-play
   final VoidCallback onTap;
-  _Pick(this.label, this.icon, this.gradient, this.onTap);
+  _Pick(this.label, this.icon, this.color, this.tracks, this.onTap);
 }
 
+/// Spotify's actual quick-pick pattern: artwork on the left edge, label, and a
+/// 1-tap shuffle-play affordance — tile-tap still opens the list.
 class _PickTile extends StatelessWidget {
   final _Pick pick;
-  const _PickTile({required this.pick});
+  final AppState state;
+  const _PickTile({required this.pick, required this.state});
   @override
   Widget build(BuildContext context) {
+    final first = pick.tracks.firstOrNull;
     return Material(
-      color: Colors.transparent,
+      color: PA.card,
+      borderRadius: BorderRadius.circular(PA.rMd),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        borderRadius: BorderRadius.circular(PA.rMd),
         onTap: pick.onTap,
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-                colors: pick.gradient,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight),
-            borderRadius: BorderRadius.circular(PA.rMd),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(pick.label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white)),
+        child: Row(
+          children: [
+            // Art edge (or a colored icon block when the list is empty/art-less)
+            if (first != null)
+              TrackArt(
+                  artUri: first.artUri,
+                  artPath: first.artPath,
+                  size: 56,
+                  radius: 0,
+                  px: 96)
+            else
+              Container(
+                width: 56,
+                height: 56,
+                color: pick.color,
+                child: Icon(pick.icon, color: Colors.white, size: 22),
               ),
-              Icon(pick.icon, color: Colors.white70, size: 20),
-            ],
-          ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(pick.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: PA.text)),
+            ),
+            if (pick.tracks.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.play_circle_fill,
+                    color: PA.accent, size: 28),
+                tooltip: 'Shuffle play',
+                onPressed: () {
+                  HapticFeedback.selectionClick();
+                  state.playerService.playShuffled(List.of(pick.tracks));
+                },
+              )
+            else
+              const SizedBox(width: 8),
+          ],
         ),
       ),
     );
@@ -572,6 +597,7 @@ class _Shelf extends StatelessWidget {
 class _Card extends StatelessWidget {
   final String? artUri;
   final String? artPath;
+  final Widget? art; // overrides artUri/artPath (e.g. a mosaic cover)
   final String title;
   final String subtitle;
   final VoidCallback onTap;
@@ -579,6 +605,7 @@ class _Card extends StatelessWidget {
   const _Card({
     this.artUri,
     this.artPath,
+    this.art,
     required this.title,
     required this.subtitle,
     required this.onTap,
@@ -608,8 +635,13 @@ class _Card extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(PA.rMd),
-                child: TrackArt(
-                    artUri: artUri, artPath: artPath, size: 138, radius: PA.rMd, px: 300),
+                child: art ??
+                    TrackArt(
+                        artUri: artUri,
+                        artPath: artPath,
+                        size: 138,
+                        radius: PA.rMd,
+                        px: 300),
               ),
               const SizedBox(height: 6),
               SizedBox(
@@ -739,6 +771,45 @@ class _PcAlbumRow extends StatelessWidget {
   }
 }
 
+/// 2×2 mosaic of the first four distinct album arts (Spotify's playlist-cover
+/// pattern). Falls back to a single art below four distinct covers.
+class _MosaicArt extends StatelessWidget {
+  final List<Track> tracks;
+  final double size;
+  const _MosaicArt({required this.tracks, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    // First track per distinct album, up to 4.
+    final reps = <Track>[];
+    final seen = <String>{};
+    for (final t in tracks) {
+      final k = t.album ?? t.artUri ?? t.artPath ?? t.key;
+      if (seen.add(k)) reps.add(t);
+      if (reps.length == 4) break;
+    }
+    if (reps.isEmpty) {
+      return SizedBox(width: size, height: size, child: const ArtPlaceholder());
+    }
+    if (reps.length < 4) {
+      final t = reps.first;
+      return TrackArt(
+          artUri: t.artUri, artPath: t.artPath, size: size, radius: 0, px: 300);
+    }
+    final half = size / 2;
+    Widget cell(Track t) => TrackArt(
+        artUri: t.artUri, artPath: t.artPath, size: half, radius: 0, px: 150);
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Column(children: [
+        Row(children: [cell(reps[0]), cell(reps[1])]),
+        Row(children: [cell(reps[2]), cell(reps[3])]),
+      ]),
+    );
+  }
+}
+
 class _PlaylistRow extends StatelessWidget {
   final List<Playlist> playlists;
   const _PlaylistRow({required this.playlists});
@@ -747,8 +818,7 @@ class _PlaylistRow extends StatelessWidget {
     return _Row(children: [
       for (final p in playlists)
         _Card(
-          artUri: p.tracks.isNotEmpty ? p.tracks.first.artUri : null,
-          artPath: p.tracks.isNotEmpty ? p.tracks.first.artPath : null,
+          art: _MosaicArt(tracks: p.tracks, size: 138),
           title: p.name,
           subtitle: '${p.tracks.length} tracks',
           onTap: () => Navigator.push(context,
@@ -770,8 +840,7 @@ class _QueueRow extends StatelessWidget {
     return _Row(children: [
       for (final q in queues)
         _Card(
-          artUri: q.tracks.first.artUri,
-          artPath: q.tracks.first.artPath,
+          art: _MosaicArt(tracks: q.tracks, size: 138),
           // Content first (a real track), count secondary — a timestamp gives
           // each queue card a distinct identity.
           title: q.tracks.first.title,

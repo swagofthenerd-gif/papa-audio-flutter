@@ -395,6 +395,35 @@ class PlayerService {
     } catch (_) {}
   }
 
+  /// The most recently resumed collections, newest first — powers the home
+  /// "Jump back in" shelf. Rows whose position is essentially the very start
+  /// are dropped (nothing meaningful to resume).
+  Future<List<CollectionResume>> recentCollections({int limit = 10}) async {
+    final db = _db;
+    if (db == null) return const [];
+    try {
+      final rows = await db.db.query('collection_resume',
+          orderBy: 'updated_at DESC', limit: limit * 2);
+      final out = <CollectionResume>[];
+      for (final r in rows) {
+        final index = r['track_index'] as int;
+        final posMs = r['position_ms'] as int;
+        if (index == 0 && posMs < 3000) continue;
+        out.add(CollectionResume(
+          collectionId: r['collection_id'] as String,
+          index: index,
+          positionMs: posMs,
+          trackTitle: r['track_title'] as String?,
+          updatedAt: r['updated_at'] as int,
+        ));
+        if (out.length >= limit) break;
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// Saved listening position for a collection, if any.
   Future<ResumePoint?> resumeFor(String collectionId) async {
     final db = _db;
@@ -630,6 +659,23 @@ class ResumePoint {
   final String? trackTitle;
   const ResumePoint(
       {required this.index, required this.positionMs, this.trackTitle});
+}
+
+/// A saved resume position for a collection (album/playlist/…), used by the
+/// home "Jump back in" shelf.
+class CollectionResume {
+  final String collectionId;
+  final int index;
+  final int positionMs;
+  final String? trackTitle;
+  final int updatedAt;
+  const CollectionResume({
+    required this.collectionId,
+    required this.index,
+    required this.positionMs,
+    this.trackTitle,
+    required this.updatedAt,
+  });
 }
 
 class SleepTimerState {

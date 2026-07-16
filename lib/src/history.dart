@@ -208,6 +208,10 @@ class HistoryService extends ChangeNotifier {
 
   int listensOf(Track t) => counts[t.key] ?? 0;
 
+  /// Latest snapshot of every track that has ever been played — the pool
+  /// recommendations rank over.
+  List<Track> get byKeyTracks => _byKey.values.toList();
+
   /// Distinct tracks ordered by listen count (desc). [since] limits to
   /// listens after that time (for day/week/month/all-time ranges).
   List<(Track, int)> mostPlayed({DateTime? since, int limit = 100}) {

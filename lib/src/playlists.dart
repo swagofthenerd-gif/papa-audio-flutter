@@ -18,6 +18,16 @@ class PlaylistsService extends ChangeNotifier {
   List<Track> get favorites => _favoriteTracks;
   bool isFavorite(Track t) => _favoriteKeys.contains(t.key);
 
+  /// Bumped on every change so views (and recommendations) can memoize
+  /// playlist/favorite-derived data instead of recomputing on every rebuild.
+  int revision = 0;
+
+  @override
+  void notifyListeners() {
+    revision++;
+    super.notifyListeners();
+  }
+
   Future<void> init(AppDatabase db) async {
     _db = db;
     try {

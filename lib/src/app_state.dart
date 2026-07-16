@@ -12,6 +12,7 @@ import 'models.dart';
 import 'player_service.dart';
 import 'playlists.dart';
 import 'queues_store.dart';
+import 'recommendations.dart';
 import 'selection.dart';
 import 'settings.dart';
 import 'waveform.dart';
@@ -29,6 +30,7 @@ class AppState extends ChangeNotifier {
   final HistoryService history = HistoryService();
   final SettingsService settings = SettingsService();
   final QueuesStore queues = QueuesStore();
+  final RecommendationService recommendations = RecommendationService();
   final TrackSelection selection = TrackSelection();
   late final ArtColorService artColors =
       ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));
@@ -177,6 +179,70 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Resolve the player's saved resume points into playable "Jump back in"
+  /// cards. Only collections we can reconstruct from current in-memory data are
+  /// returned (albums / local albums / playlists); others are skipped.
+  Future<List<JumpBackItem>> jumpBackIn({int limit = 8}) async {
+    final rows = await playerService.recentCollections(limit: limit * 2);
+    final out = <JumpBackItem>[];
+    for (final r in rows) {
+      final cid = r.collectionId;
+      String? title, artUri, artPath;
+      List<Track>? tracks;
+      if (cid.startsWith('palbum:')) {
+        final id = cid.substring(7);
+        final a = albums.where((x) => x.id == id).firstOrNull;
+        if (a != null) {
+          title = a.name;
+          tracks = a.tracks;
+          artPath = a.artPath;
+        }
+      } else if (cid.startsWith('lalbum:')) {
+        final id = int.tryParse(cid.substring(7));
+        final a =
+            localLibrary.albums.where((x) => x.albumId == id).firstOrNull;
+        if (a != null) {
+          title = a.name;
+          tracks = a.tracks;
+          artUri = 'localart://${a.artTrackId}/${a.albumId}';
+        }
+      } else if (cid.startsWith('playlist:')) {
+        final id = cid.substring(9);
+        final p = playlists.playlists.where((x) => x.id == id).firstOrNull;
+        if (p != null && p.tracks.isNotEmpty) {
+          title = p.name;
+          tracks = p.tracks;
+          artUri = p.tracks.first.artUri;
+          artPath = p.tracks.first.artPath;
+        }
+      }
+      if (title == null || tracks == null || tracks.isEmpty) continue;
+      final idx = r.index.clamp(0, tracks.length - 1);
+      out.add(JumpBackItem(
+        collectionId: cid,
+        title: title,
+        subtitle: r.trackTitle ?? tracks[idx].title,
+        artUri: artUri ?? tracks[idx].artUri,
+        artPath: artPath ?? tracks[idx].artPath,
+        tracks: tracks,
+        index: idx,
+        positionMs: r.positionMs,
+      ));
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /// Resume a "Jump back in" card at its saved track and position.
+  Future<void> resumeJumpBack(JumpBackItem item) => playerService.playQueue(
+      item.tracks, item.index,
+      collectionId: item.collectionId,
+      startPosition: Duration(milliseconds: item.positionMs));
+
+  /// Play a generated mix as a fresh (non-collection) queue.
+  Future<void> playMix(List<Track> tracks) =>
+      playerService.playQueue(tracks, 0);
+
   /// Play a single YouTube result, streamed through the bridge.
   Future<void> playYt(YtResult v) {
     final t = Track(
@@ -190,4 +256,26 @@ class AppState extends ChangeNotifier {
     );
     return playerService.playQueue([t], 0);
   }
+}
+
+/// A resolved home "Jump back in" card.
+class JumpBackItem {
+  final String collectionId;
+  final String title;
+  final String subtitle;
+  final String? artUri;
+  final String? artPath;
+  final List<Track> tracks;
+  final int index;
+  final int positionMs;
+  const JumpBackItem({
+    required this.collectionId,
+    required this.title,
+    required this.subtitle,
+    this.artUri,
+    this.artPath,
+    required this.tracks,
+    required this.index,
+    required this.positionMs,
+  });
 }

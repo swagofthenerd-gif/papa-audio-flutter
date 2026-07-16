@@ -178,6 +178,14 @@ class LocalLibrary extends ChangeNotifier {
       }
     }();
     _artCache[key] = future;
+    // A transient channel error would otherwise pin a null result for the whole
+    // session (blank thumbnail, no retry). Evict failures so the next request
+    // re-fetches; keep real bytes cached.
+    future.then((bytes) {
+      if (bytes == null && identical(_artCache[key], future)) {
+        _artCache.remove(key);
+      }
+    });
     while (_artCache.length > _artCacheCap) {
       _artCache.remove(_artCache.keys.first); // evict least recently used
     }

@@ -36,7 +36,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   http: ^1.6.0
   just_audio: ^0.10.6
-  just_audio_background: ^0.0.1-beta.17
+  # Pinned exactly: a caret range on a 0.0.x pre-release would let `pub upgrade`
+  # pull a newer beta that has, historically, changed background/notification
+  # behavior without review.
+  just_audio_background: 0.0.1-beta.17
   provider: ^6.1.5+1
   cached_network_image: ^3.4.1
   flutter_cache_manager: ^3.4.1

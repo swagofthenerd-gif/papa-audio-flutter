@@ -59,6 +59,14 @@ class MainActivity : AudioServiceActivity() {
         requestHighRefreshRate()
     }
 
+    override fun onDestroy() {
+        // Release the worker pools so a destroyed activity (and any in-flight
+        // decode holding a reference to it) doesn't leak across recreation.
+        executor.shutdownNow()
+        waveformExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
     /**
      * Ask for the display's fastest mode at the current resolution (90/120Hz
      * panels default some apps to 60) — scrolling and the player morph animate
@@ -179,7 +187,13 @@ class MainActivity : AudioServiceActivity() {
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false
+            // A corrupt/DRM stream can leave the decoder returning only
+            // TRY_AGAIN forever; since this runs on a single shared worker, one
+            // bad file would wedge all future waveform requests. Bail after a
+            // wall-clock cap so the worker is never permanently blocked.
+            val deadline = System.currentTimeMillis() + 20_000
             while (!outputDone) {
+                if (System.currentTimeMillis() > deadline) return null
                 if (!inputDone) {
                     val inIdx = codec.dequeueInputBuffer(5000)
                     if (inIdx >= 0) {
@@ -246,7 +260,14 @@ class MainActivity : AudioServiceActivity() {
             return
         }
         pendingPermissionResult = result
-        requestPermissions(arrayOf(audioPermission), REQ_AUDIO)
+        // On Android 13+ also ask for POST_NOTIFICATIONS in the same prompt so
+        // the media-playback notification/lock-screen controls can show.
+        val perms = if (Build.VERSION.SDK_INT >= 33) {
+            arrayOf(audioPermission, Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            arrayOf(audioPermission)
+        }
+        requestPermissions(perms, REQ_AUDIO)
     }
 
     override fun onRequestPermissionsResult(

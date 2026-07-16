@@ -123,7 +123,9 @@ class AppDatabase {
           if (track is! Map) continue;
           batch.insert('history', {
             'at': (e['at'] as num?)?.toInt() ?? 0,
-            'track_key': (track['id'] ?? '').toString(),
+            // Mirror Track.key (id ?? filePath) so migrated listens merge with
+            // new ones instead of colliding on an empty key.
+            'track_key': (track['id'] ?? track['filePath'] ?? '').toString(),
             'track_json': jsonEncode(track),
           });
         }
@@ -138,7 +140,7 @@ class AppDatabase {
           batch.insert(
               'favorites',
               {
-                'track_key': (t['id'] ?? '').toString(),
+                'track_key': (t['id'] ?? t['filePath'] ?? '').toString(),
                 'added_at': 0,
                 'track_json': jsonEncode(t),
               },
@@ -199,7 +201,9 @@ class AppDatabase {
               'saved_queues',
               {
                 'at': (q['at'] as num?)?.toInt() ?? 0,
-                'sig': tracks.map((t) => (t as Map)['id'] ?? '').join(),
+                // Match QueuesStore.sigOf so the runtime dedup DELETE finds this
+                // migrated row instead of leaving a duplicate.
+                'sig': _legacyQueueSig(tracks),
                 'tracks_json': jsonEncode(tracks),
               },
               conflictAlgorithm: ConflictAlgorithm.replace);
@@ -227,3 +231,14 @@ class AppDatabase {
 }
 
 dynamic _decode(String raw) => jsonDecode(raw);
+
+/// Mirrors QueuesStore.sigOf (kept here to avoid a cross-import) so migrated
+/// saved-queue rows carry the same signature the runtime dedup expects.
+String _legacyQueueSig(List tracks) {
+  var h = 0;
+  for (final t in tracks) {
+    final id = (t is Map ? (t['id'] ?? t['filePath'] ?? '') : '').toString();
+    h = 0x1fffffff & (h * 31 + id.hashCode);
+  }
+  return 'h$h:${tracks.length}';
+}

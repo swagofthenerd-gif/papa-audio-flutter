@@ -90,6 +90,11 @@ class SettingsService extends ChangeNotifier {
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
     genreSeparators = p.getStringList('s.genreSeps') ?? genreSeparators;
     splitBlacklist = p.getStringList('s.splitBlacklist') ?? splitBlacklist;
+    // Drop any splitter built from defaults before persisted separators loaded,
+    // and bump revision so splitter-memoized groupings recompute.
+    _artistSplitter = null;
+    _genreSplitter = null;
+    revision++;
     notifyListeners();
   }
 

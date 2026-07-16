@@ -58,16 +58,24 @@ class DownloadManager extends ChangeNotifier {
     notifyListeners();
 
     final base = _safeName(t.id);
-    final audioFile = File('${dir.path}${Platform.pathSeparator}$base${_ext(t.filePath)}');
+    // Distinct ids that normalize to the same safe name would otherwise
+    // overwrite each other's file; a short hash of the raw id keeps them apart.
+    final unique = '${base}_${t.id.hashCode.toUnsigned(20).toRadixString(16)}';
+    final audioFile = File('${dir.path}${Platform.pathSeparator}$unique${_ext(t.filePath)}');
+    final client = http.Client();
     try {
       final req = http.Request('GET', Uri.parse(bridge.streamUrl(t.filePath, raw: true)));
-      final resp = await http.Client().send(req).timeout(const Duration(minutes: 5));
+      final resp = await client.send(req).timeout(const Duration(minutes: 5));
       if (resp.statusCode != 200) throw 'HTTP ${resp.statusCode}';
       final total = resp.contentLength ?? 0;
       var received = 0;
       final sink = audioFile.openWrite();
       try {
-        await for (final chunk in resp.stream) {
+        // A stalled LAN connection mid-body would otherwise hang forever,
+        // wedging `busy`/progress and blocking album downloads. Cap idle gaps
+        // between chunks.
+        await for (final chunk
+            in resp.stream.timeout(const Duration(seconds: 60))) {
           sink.add(chunk);
           received += chunk.length;
           if (total > 0) {
@@ -93,7 +101,7 @@ class DownloadManager extends ChangeNotifier {
         try {
           final r = await http.get(Uri.parse(artUrl)).timeout(const Duration(seconds: 20));
           if (r.statusCode == 200 && r.bodyBytes.isNotEmpty) {
-            artFileName = '$base.art.jpg';
+            artFileName = '$unique.art.jpg';
             await File('${dir.path}${Platform.pathSeparator}$artFileName')
                 .writeAsBytes(r.bodyBytes);
           }
@@ -121,6 +129,7 @@ class DownloadManager extends ChangeNotifier {
         if (await audioFile.exists()) await audioFile.delete();
       } catch (_) {}
     } finally {
+      client.close(); // release keep-alive sockets on every download
       progress.remove(t.id);
       notifyListeners();
     }

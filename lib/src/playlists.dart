@@ -82,9 +82,13 @@ class PlaylistsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  int _plSeq = 0;
+
   Future<Playlist> create(String name) async {
+    // A bare millisecond id collides when two playlists are created in the same
+    // millisecond (e.g. a scripted import loop); a monotonic suffix disambiguates.
     final p = Playlist(
-      id: 'pl_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'pl_${DateTime.now().millisecondsSinceEpoch}_${_plSeq++}',
       name: name.trim().isEmpty ? 'Playlist ${playlists.length + 1}' : name.trim(),
       tracks: [],
       createdAt: DateTime.now().millisecondsSinceEpoch,

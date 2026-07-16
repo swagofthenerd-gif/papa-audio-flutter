@@ -37,6 +37,10 @@ class _HomeTabState extends State<HomeTab> {
   List<LocalAlbum> _recentlyAdded = const [];
   String _sig = '';
 
+  // Top-of-page source filter. Empty-data chips are hidden, so this only ever
+  // narrows to sources that actually exist.
+  String _filter = 'All';
+
   void _recompute(AppState s) {
     final sig = '${s.history.revision}|${s.localLibrary.revision}';
     if (sig == _sig) return;
@@ -70,6 +74,20 @@ class _HomeTabState extends State<HomeTab> {
             s.localLibrary.loading &&
             localAlbums.isEmpty;
 
+        // Available filter chips, gated on data that actually exists.
+        final hasReco = s.recommendations.shelves.isNotEmpty;
+        final filters = <String>[
+          'All',
+          if (hasReco) 'Mixes',
+          if (localAlbums.isNotEmpty) 'On phone',
+          if (s.albums.isNotEmpty) 'From PC',
+        ];
+        if (!filters.contains(_filter)) _filter = 'All';
+        final all = _filter == 'All';
+        final showReco = all || _filter == 'Mixes';
+        final showLocal = all || _filter == 'On phone';
+        final showPc = all || _filter == 'From PC';
+
         return RefreshIndicator(
           color: PA.accent,
           onRefresh: () async {
@@ -78,47 +96,56 @@ class _HomeTabState extends State<HomeTab> {
           },
           child: CustomScrollView(
             slivers: [
-              SliverToBoxAdapter(child: _Header()),
-              SliverToBoxAdapter(child: _QuickPicks(state: s)),
+              SliverToBoxAdapter(child: _Header(state: s)),
+              if (filters.length > 1)
+                SliverToBoxAdapter(
+                  child: _FilterChips(
+                    filters: filters,
+                    selected: _filter,
+                    onSelect: (f) => setState(() => _filter = f),
+                  ),
+                ),
+              if (all) SliverToBoxAdapter(child: _QuickPicks(state: s)),
 
               if (firstIndexing) const _SkeletonShelves(),
 
               // Jump back in — resumable albums/playlists, position-accurate.
-              SliverToBoxAdapter(child: _JumpBackIn(state: s)),
+              if (showReco) SliverToBoxAdapter(child: _JumpBackIn(state: s)),
 
               // On-device recommendation shelves (mixes, rotations, etc).
-              for (final shelf in s.recommendations.shelves)
-                _RecoShelfView(shelf: shelf),
+              if (showReco)
+                for (final shelf in s.recommendations.shelves)
+                  _RecoShelfView(shelf: shelf),
 
-              if (recent.isNotEmpty)
+              if (showLocal && recent.isNotEmpty)
                 _Shelf(
                   title: 'Recently played',
                   onSeeAll: () => _openTracks(context, 'Recently played', recent),
                   child: _TrackRow(tracks: recent),
                 ),
-              if (recentlyAdded.isNotEmpty)
+              if (showLocal && recentlyAdded.isNotEmpty)
                 _Shelf(
                   title: 'Recently added',
                   onSeeAll: () => Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const RecentlyAddedScreen())),
                   child: _LocalAlbumRow(albums: recentlyAdded),
                 ),
-              if (s.playlists.playlists.isNotEmpty)
+              if (all && s.playlists.playlists.isNotEmpty)
                 _Shelf(
                   title: 'Your playlists',
                   child: _PlaylistRow(playlists: s.playlists.playlists),
                 ),
-              if (localAlbums.isNotEmpty)
+              if (showLocal && localAlbums.isNotEmpty)
                 _Shelf(
                   title: 'On your phone',
                   child: _LocalAlbumRow(albums: localAlbums),
                 ),
-              if (s.albums.isNotEmpty)
+              if (showPc && s.albums.isNotEmpty)
                 _Shelf(
                   title: 'From your PC',
                   child: _PcAlbumRow(albums: s.albums),
                 ),
-              if (s.queues.saved.isNotEmpty)
+              if (all && s.queues.saved.isNotEmpty)
                 _Shelf(
                   title: 'Recent queues',
                   child: _QueueRow(queues: s.queues.saved),
@@ -154,6 +181,9 @@ class _HomeTabState extends State<HomeTab> {
 // ── Header ────────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
+  final AppState state;
+  const _Header({required this.state});
+
   static const _months = [
     'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY',
     'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
@@ -165,6 +195,33 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    // Tint the top of the page from the current/last track's artwork — the one
+    // place ArtColorService was already used was the player; bring it to Home.
+    final seed = state.playerService.currentTrack ??
+        state.history.recentTracks(limit: 1).firstOrNull;
+    final header = _content(context, now);
+    if (seed == null) return header;
+    return FutureBuilder<Color?>(
+      future: state.artColors.forTrack(seed),
+      builder: (_, snap) {
+        final c = snap.data;
+        if (c == null) return header;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 500),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [c.withValues(alpha: 0.55), PA.background],
+            ),
+          ),
+          child: header,
+        );
+      },
+    );
+  }
+
+  Widget _content(BuildContext context, DateTime now) {
     final hour = now.hour;
     final greeting = hour < 5
         ? 'Late night'
@@ -227,6 +284,48 @@ class _Header extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const SettingsScreen())),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Filter chips ──────────────────────────────────────────────────────────────
+
+class _FilterChips extends StatelessWidget {
+  final List<String> filters;
+  final String selected;
+  final ValueChanged<String> onSelect;
+  const _FilterChips(
+      {required this.filters, required this.selected, required this.onSelect});
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+        itemCount: filters.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final f = filters[i];
+          final on = f == selected;
+          return ChoiceChip(
+            label: Text(f),
+            selected: on,
+            onSelected: (_) {
+              HapticFeedback.selectionClick();
+              onSelect(f);
+            },
+            showCheckmark: false,
+            backgroundColor: PA.card,
+            selectedColor: PA.accent,
+            side: BorderSide.none,
+            labelStyle: TextStyle(
+                color: on ? Colors.black : PA.text,
+                fontWeight: FontWeight.w600,
+                fontSize: 13),
+          );
+        },
       ),
     );
   }
@@ -375,6 +474,13 @@ class _RecoShelfView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
+    if (shelf.kind == RecoKind.artists) {
+      return _Shelf(
+        title: shelf.title,
+        kicker: shelf.kicker,
+        child: _ArtistRow(artists: shelf.artists),
+      );
+    }
     if (shelf.kind == RecoKind.mixes) {
       return _Shelf(
         title: shelf.title,
@@ -684,6 +790,64 @@ class _QueueRow extends StatelessWidget {
     if (d.inHours < 24) return '${d.inHours}h ago';
     if (d.inDays < 7) return '${d.inDays}d ago';
     return '${d.inDays ~/ 7}w ago';
+  }
+}
+
+/// Circular artist tiles — a look every big streaming home has and Papa lacked.
+class _ArtistRow extends StatelessWidget {
+  final List<RecoArtist> artists;
+  const _ArtistRow({required this.artists});
+  @override
+  Widget build(BuildContext context) {
+    final s = context.read<AppState>();
+    final scaler = MediaQuery.textScalerOf(context);
+    final height = 118 + 8 + scaler.scale(13) + 8;
+    return SizedBox(
+      height: height,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: artists.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 14),
+        itemBuilder: (_, i) {
+          final a = artists[i];
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(59),
+              onTap: () => s.playerService.playQueue(a.tracks, 0,
+                  collectionId: 'artist:${a.name}'),
+              onLongPress: () {
+                HapticFeedback.selectionClick();
+                showCollectionMenu(context, title: a.name, tracks: a.tracks);
+              },
+              child: SizedBox(
+                width: 118,
+                child: Column(
+                  children: [
+                    ClipOval(
+                      child: TrackArt(
+                          artUri: a.artUri,
+                          artPath: a.artPath,
+                          size: 118,
+                          radius: 59,
+                          px: 300),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(a.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13)),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 }
 

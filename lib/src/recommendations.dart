@@ -82,7 +82,7 @@ class RecommendationService extends ChangeNotifier {
   }
 }
 
-enum RecoKind { tracks, mixes }
+enum RecoKind { tracks, mixes, artists }
 
 /// A home row. Either a list of [tracks] (rendered as track cards) or a list of
 /// [mixes] (rendered as mix cards), decided by [kind].
@@ -93,6 +93,7 @@ class RecoShelf {
   final RecoKind kind;
   final List<Track> tracks;
   final List<RecoMix> mixes;
+  final List<RecoArtist> artists;
   const RecoShelf({
     required this.id,
     required this.title,
@@ -100,7 +101,18 @@ class RecoShelf {
     this.kind = RecoKind.tracks,
     this.tracks = const [],
     this.mixes = const [],
+    this.artists = const [],
   });
+}
+
+/// A top artist, rendered as a circular tile; tapping plays their catalogue.
+class RecoArtist {
+  final String name;
+  final String? artUri;
+  final String? artPath;
+  final List<Track> tracks;
+  const RecoArtist(
+      {required this.name, this.artUri, this.artPath, required this.tracks});
 }
 
 /// A generated playlist surfaced as a single card.
@@ -262,6 +274,36 @@ List<RecoShelf> _buildShelves(_RecoInput inp) {
         title: 'Your top mixes',
         kind: RecoKind.mixes,
         mixes: mixes,
+      ));
+    }
+
+    // Top artists — circular tiles, most-played first. Reuses the artist
+    // weights and library pools computed just above.
+    final artists = <RecoArtist>[];
+    for (final a in topArtists.take(12)) {
+      final lib = libByArtist[a.key] ?? const [];
+      if (lib.isEmpty) continue;
+      // Representative art = the artist's most-played (else first) track.
+      final rep = (lib.where((t) => (inp.counts[t.key] ?? 0) > 0).toList()
+            ..sort((x, y) =>
+                (inp.counts[y.key] ?? 0).compareTo(inp.counts[x.key] ?? 0)))
+          .firstOrNull ??
+          lib.first;
+      artists.add(RecoArtist(
+        name: artistName[a.key] ?? rep.artist,
+        artUri: rep.artUri,
+        artPath: rep.artPath,
+        tracks: lib,
+      ));
+      if (artists.length >= 10) break;
+    }
+    if (artists.length >= 3) {
+      shelves.add(RecoShelf(
+        id: 'top_artists',
+        kicker: 'ON REPEAT',
+        title: 'Your top artists',
+        kind: RecoKind.artists,
+        artists: artists,
       ));
     }
   }

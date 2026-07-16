@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../main.dart' show Shell;
 import '../app_state.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -137,8 +138,13 @@ class _SlskResults extends StatelessWidget {
             icon: const Icon(Icons.download, color: PA.accent),
             onPressed: () {
               context.read<AppState>().bridge.slskDownload(f);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Download started on PC — see Downloads tab')));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: const Text('Download started on PC'),
+                action: SnackBarAction(
+                  label: 'VIEW',
+                  onPressed: () => Shell.switchTo?.call(3),
+                ),
+              ));
             },
           ),
         );

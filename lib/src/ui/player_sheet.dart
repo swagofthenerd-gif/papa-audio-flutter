@@ -424,9 +424,14 @@ class _FullPlayer extends StatelessWidget {
                   children: [
                     // Spotify-style: title opens the album, artist opens the
                     // artist hub (YouTube → PC → on-phone, labeled sections).
+                    // Collapse the sheet first — it's an overlay above the
+                    // navigator, so a pushed route would otherwise appear
+                    // *behind* the still-expanded player.
                     GestureDetector(
-                      onTap: () =>
-                          openAlbum(context, context.read<AppState>(), track),
+                      onTap: () {
+                        onCollapse();
+                        openAlbum(context, context.read<AppState>(), track);
+                      },
                       child: Text(track.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -435,8 +440,10 @@ class _FullPlayer extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     GestureDetector(
-                      onTap: () =>
-                          openArtist(context, context.read<AppState>(), track),
+                      onTap: () {
+                        onCollapse();
+                        openArtist(context, context.read<AppState>(), track);
+                      },
                       child: Text(track.artist,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

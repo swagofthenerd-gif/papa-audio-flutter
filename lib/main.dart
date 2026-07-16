@@ -147,6 +147,12 @@ class _SetupScreenState extends State<SetupScreen> {
 // ── Shell: pages + nav bar + the persistent player sheet overlay ─────────────
 class Shell extends StatefulWidget {
   const Shell({super.key});
+
+  /// Registered by the live shell state — lets deep leaves (e.g. a snackbar
+  /// "VIEW" action) switch the bottom tab without threading callbacks through
+  /// every screen. Tabs: 0 Home, 1 Search, 2 Library, 3 Downloads.
+  static void Function(int index)? switchTo;
+
   @override
   State<Shell> createState() => _ShellState();
 }
@@ -154,6 +160,20 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   int _tab = 0;
   static const _pages = [HomeTab(), SearchTab(), LibraryTab(), DownloadsTab()];
+
+  @override
+  void initState() {
+    super.initState();
+    Shell.switchTo = (i) {
+      if (mounted) setState(() => _tab = i.clamp(0, _pages.length - 1));
+    };
+  }
+
+  @override
+  void dispose() {
+    if (Shell.switchTo != null) Shell.switchTo = null;
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

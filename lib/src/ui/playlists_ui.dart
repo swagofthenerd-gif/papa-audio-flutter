@@ -130,8 +130,12 @@ class PlaylistScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: s.playlists,
       builder: (context, _) {
-        // The playlist may have been deleted while this screen is open.
+        // The playlist may have been deleted while this screen is open — pop
+        // back to where the user came from instead of showing a blank screen.
         if (!s.playlists.playlists.any((p) => p.id == playlist.id)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) Navigator.of(context).maybePop();
+          });
           return const Scaffold(body: SizedBox.shrink());
         }
         return Scaffold(

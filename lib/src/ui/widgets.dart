@@ -43,13 +43,15 @@ class TrackArt extends StatelessWidget {
         .round()
         .clamp(64, 1600)
         .toInt();
+    final seed = artUri ?? artPath;
+    final placeholder = ArtPlaceholder(seed: seed);
     final a = artUri;
     if (a != null && a.startsWith('localart://')) {
       return FutureBuilder<Uint8List?>(
         future: LocalLibrary.artForUri(a, size: px),
         builder: (_, snap) => snap.data != null
             ? Image.memory(snap.data!, fit: BoxFit.cover, gaplessPlayback: true)
-            : const ArtPlaceholder(),
+            : placeholder,
       );
     }
     if (a != null && a.startsWith('file:')) {
@@ -57,42 +59,64 @@ class TrackArt extends StatelessWidget {
         File.fromUri(Uri.parse(a)),
         fit: BoxFit.cover,
         cacheWidth: decodePx,
-        errorBuilder: (_, _, _) => const ArtPlaceholder(),
+        errorBuilder: (_, _, _) => placeholder,
       );
     }
     final url = (a != null && a.startsWith('http'))
         ? a
         : context.read<AppState>().bridge.artUrl(artPath, width: px);
-    if (url == null) return const ArtPlaceholder();
+    if (url == null) return placeholder;
     return CachedNetworkImage(
       imageUrl: url,
       fit: BoxFit.cover,
       memCacheWidth: decodePx,
-      placeholder: (_, _) => Container(color: PA.card),
-      errorWidget: (_, _, _) => const ArtPlaceholder(),
+      placeholder: (_, _) => const ColoredBox(color: PA.card),
+      errorWidget: (_, _, _) => placeholder,
     );
   }
 }
 
 class ArtPlaceholder extends StatelessWidget {
-  const ArtPlaceholder({super.key});
+  /// When set, the placeholder derives a stable hue from this string so art-less
+  /// tiles look intentionally designed (and distinct) rather than uniformly grey.
+  final String? seed;
+  const ArtPlaceholder({super.key, this.seed});
+
   @override
-  Widget build(BuildContext context) => Container(
-        color: PA.surfaceElevated,
-        // Icon scales with the slot so the placeholder reads correctly at any
-        // size (incl. inside the player's FittedBox-scaled morphing artwork).
-        child: LayoutBuilder(
-          builder: (_, c) {
-            final side =
-                c.hasBoundedWidth && c.hasBoundedHeight
-                    ? (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight)
-                    : 44.0;
-            return Center(
-                child: Icon(Icons.music_note,
-                    color: PA.textMuted, size: (side * 0.5).clamp(12.0, 96.0)));
-          },
-        ),
-      );
+  Widget build(BuildContext context) {
+    final s = seed;
+    final Gradient gradient;
+    if (s != null && s.isNotEmpty) {
+      final hue = (s.hashCode & 0x7fffffff) % 360;
+      final base = HSLColor.fromAHSL(1, hue.toDouble(), 0.32, 0.26).toColor();
+      final dark = HSLColor.fromAHSL(1, hue.toDouble(), 0.30, 0.14).toColor();
+      gradient = LinearGradient(
+          colors: [base, dark],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight);
+    } else {
+      gradient = const LinearGradient(
+          colors: [PA.surfaceElevated, PA.surface],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight);
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(gradient: gradient),
+      // Icon scales with the slot so the placeholder reads correctly at any
+      // size (incl. inside the player's FittedBox-scaled morphing artwork).
+      child: LayoutBuilder(
+        builder: (_, c) {
+          final side = c.hasBoundedWidth && c.hasBoundedHeight
+              ? (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight)
+              : 44.0;
+          return Center(
+              child: Icon(Icons.music_note,
+                  color: Colors.white.withValues(alpha: 0.32),
+                  size: (side * 0.5).clamp(12.0, 96.0)));
+        },
+      ),
+    );
+  }
 }
 
 class ErrorView extends StatelessWidget {

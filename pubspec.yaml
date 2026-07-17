@@ -51,6 +51,9 @@ dependencies:
   # Cookie-login webview: captures the YouTube account session for personalized
   # innertube requests, and cookie read/write for auth state.
   flutter_inappwebview: ^6.1.5
+  # Optional video playback: the player's "show video" toggle plays a muxed
+  # YouTube stream (its own audio) while just_audio is paused. Audio-first.
+  video_player: ^2.9.2
 
 dev_dependencies:
   flutter_test:

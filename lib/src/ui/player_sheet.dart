@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player/video_player.dart';
 
 import '../app_state.dart';
 import '../lyrics.dart';
@@ -45,18 +46,52 @@ class _PlayerSheetState extends State<PlayerSheet>
   /// lyrics button). Lives here so the morphing artwork can hide with it.
   final ValueNotifier<bool> lyricsOn = ValueNotifier(false);
 
+  /// Video overlay on (YouTube tracks only). Playing a muxed stream through the
+  /// video engine while just_audio is paused — see YtVideoController.
+  final ValueNotifier<bool> videoOn = ValueNotifier(false);
+
   Color? _artColor; // dominant artwork color for the expanded background
   String? _artColorKey;
+
+  /// Toggle the video overlay for the current YouTube track. Pauses audio and
+  /// hands off to the video engine; toggling off resumes audio at the video's
+  /// position.
+  Future<void> _toggleVideo(String videoId) async {
+    final s = context.read<AppState>();
+    if (videoOn.value) {
+      videoOn.value = false;
+      final at = await s.ytVideo.close();
+      await s.playerService.resumeFromVideo(at);
+    } else {
+      videoOn.value = true;
+      final at = await s.playerService.suspendForVideo();
+      await s.ytVideo.open(videoId, fromSec: at);
+      if (s.ytVideo.error != null && mounted) {
+        // Couldn't resolve a video stream — fall back to audio.
+        videoOn.value = false;
+        await s.playerService.resumeFromVideo(at);
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Video unavailable for this track')));
+      }
+    }
+  }
 
   @override
   void dispose() {
     lyricsOn.dispose();
+    videoOn.dispose();
     _c.dispose();
     super.dispose();
   }
 
   void _updateArtColor(BuildContext context, Track track) {
     if (_artColorKey == track.key) return;
+    // Track changed — tear down any video overlay so it can't play the wrong
+    // clip over the new track's audio.
+    if (videoOn.value) {
+      videoOn.value = false;
+      context.read<AppState>().ytVideo.close();
+    }
     _artColorKey = track.key;
     final s = context.read<AppState>();
     if (!s.settings.dynamicColors) {
@@ -119,6 +154,8 @@ class _PlayerSheetState extends State<PlayerSheet>
           topInset: topInset,
           artSide: fullSide,
           lyricsOn: lyricsOn,
+          videoOn: videoOn,
+          onToggleVideo: _toggleVideo,
           onCollapse: () => _c.fling(velocity: -2.2),
         );
         final miniBar = _MiniBar(ps: ps, track: track);
@@ -229,6 +266,18 @@ class _PlayerSheetState extends State<PlayerSheet>
                                 ),
                               ),
                             ),
+                            // Video overlay (YouTube tracks): occupies the art
+                            // rect only when expanded and the video is playing.
+                            if (t > 0.5)
+                              Positioned.fromRect(
+                                rect: artRect,
+                                child: ValueListenableBuilder<bool>(
+                                  valueListenable: videoOn,
+                                  builder: (_, on, _) => on
+                                      ? _VideoOverlay(radius: 4 + 6 * t)
+                                      : const SizedBox.shrink(),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -351,12 +400,54 @@ class _MiniBarState extends State<_MiniBar> {
   }
 }
 
+/// The YouTube video overlay: fills the artwork rect while active. Its own
+/// audio comes from the muxed stream, so just_audio stays paused meanwhile.
+class _VideoOverlay extends StatelessWidget {
+  final double radius;
+  const _VideoOverlay({required this.radius});
+  @override
+  Widget build(BuildContext context) {
+    final vid = context.read<AppState>().ytVideo;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: AnimatedBuilder(
+          animation: vid,
+          builder: (_, _) {
+            if (vid.loading) {
+              return const CircularProgressIndicator(color: PA.accent);
+            }
+            final c = vid.controller;
+            if (c == null || !c.value.isInitialized) {
+              return const Icon(Icons.ondemand_video,
+                  color: PA.textMuted, size: 40);
+            }
+            return FittedBox(
+              fit: BoxFit.cover,
+              clipBehavior: Clip.hardEdge,
+              child: SizedBox(
+                width: c.value.size.width,
+                height: c.value.size.height,
+                child: VideoPlayer(c),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _FullPlayer extends StatelessWidget {
   final PlayerService ps;
   final Track track;
   final double topInset;
   final double artSide; // must match the sheet's morph target rect
   final ValueNotifier<bool> lyricsOn;
+  final ValueNotifier<bool> videoOn;
+  final Future<void> Function(String videoId) onToggleVideo;
   final VoidCallback onCollapse;
   const _FullPlayer(
       {required this.ps,
@@ -364,6 +455,8 @@ class _FullPlayer extends StatelessWidget {
       required this.topInset,
       required this.artSide,
       required this.lyricsOn,
+      required this.videoOn,
+      required this.onToggleVideo,
       required this.onCollapse});
 
   @override
@@ -494,6 +587,17 @@ class _FullPlayer extends StatelessWidget {
                   onPressed: () => lyricsOn.value = !lyr,
                 ),
               ),
+              // Video toggle — YouTube tracks only.
+              if (track.id.startsWith('yt:'))
+                ValueListenableBuilder<bool>(
+                  valueListenable: videoOn,
+                  builder: (_, on, _) => IconButton(
+                    tooltip: on ? 'Hide video' : 'Show video',
+                    icon: Icon(on ? Icons.music_note : Icons.ondemand_video_outlined,
+                        size: 20, color: on ? PA.accent : PA.textMuted),
+                    onPressed: () => onToggleVideo(track.id.substring(3)),
+                  ),
+                ),
               StreamBuilder<bool>(
                 stream: ps.equalizer.enabledStream,
                 builder: (_, snap) => IconButton(

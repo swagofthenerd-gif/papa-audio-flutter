@@ -19,6 +19,7 @@ import 'waveform.dart';
 import 'yt/yt_auth.dart';
 import 'yt/yt_models.dart';
 import 'yt/yt_service.dart';
+import 'yt/yt_video.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
 /// on purpose — screens read exactly what they need and rebuild narrowly.
@@ -36,6 +37,7 @@ class AppState extends ChangeNotifier {
   final RecommendationService recommendations = RecommendationService();
   final YtAuth ytAuth = YtAuth();
   late final YtService yt = YtService(ytAuth);
+  late final YtVideoController ytVideo = YtVideoController(yt.tube);
   final TrackSelection selection = TrackSelection();
   late final ArtColorService artColors =
       ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));

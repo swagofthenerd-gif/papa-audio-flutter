@@ -474,6 +474,25 @@ class PlayerService {
     }
   }
 
+  // ── Video-toggle coordination ──────────────────────────────────────────────
+
+  /// Pause audio so the video overlay can take over, returning the position
+  /// (seconds) the video should start from.
+  Future<double> suspendForVideo() async {
+    final at = _player.position.inMilliseconds / 1000.0;
+    await _player.pause();
+    return at;
+  }
+
+  /// Resume audio at [sec] after the video overlay closes.
+  Future<void> resumeFromVideo(double sec) async {
+    try {
+      await _player.seek(Duration(milliseconds: (sec * 1000).round()));
+    } catch (_) {}
+    _restoreAfterFadeIfIdle();
+    _player.play();
+  }
+
   /// Saved listening position for a collection, if any.
   Future<ResumePoint?> resumeFor(String collectionId) async {
     final db = _db;

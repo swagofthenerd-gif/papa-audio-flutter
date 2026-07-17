@@ -16,6 +16,9 @@ import 'recommendations.dart';
 import 'selection.dart';
 import 'settings.dart';
 import 'waveform.dart';
+import 'yt/yt_auth.dart';
+import 'yt/yt_models.dart';
+import 'yt/yt_service.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
 /// on purpose — screens read exactly what they need and rebuild narrowly.
@@ -31,6 +34,8 @@ class AppState extends ChangeNotifier {
   final SettingsService settings = SettingsService();
   final QueuesStore queues = QueuesStore();
   final RecommendationService recommendations = RecommendationService();
+  final YtAuth ytAuth = YtAuth();
+  late final YtService yt = YtService(ytAuth);
   final TrackSelection selection = TrackSelection();
   late final ArtColorService artColors =
       ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));
@@ -103,6 +108,10 @@ class AppState extends ChangeNotifier {
       return t.duration > 0 ? want.clamp(0, t.duration * 0.5) : want;
     };
     playerService.onNewQueue = queues.record;
+    // YouTube Music: auth + feed cache load, and on-device stream resolution.
+    await ytAuth.init(db);
+    playerService.ytResolver = yt.resolver;
+    yt.init(db); // fire-and-forget; home paints from cache, refreshes behind
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence(db);
     if (bridge.configured) await loadLibrary();
@@ -243,7 +252,8 @@ class AppState extends ChangeNotifier {
   Future<void> playMix(List<Track> tracks) =>
       playerService.playQueue(tracks, 0);
 
-  /// Play a single YouTube result, streamed through the bridge.
+  /// Play a single YouTube result. Streams on-device (lazy extraction); the
+  /// null sourceUri routes it through YtLazyAudioSource in the player.
   Future<void> playYt(YtResult v) {
     final t = Track(
       id: 'yt:${v.id}',
@@ -251,10 +261,50 @@ class AppState extends ChangeNotifier {
       artist: v.channel.isEmpty ? 'YouTube' : v.channel,
       filePath: '',
       duration: (v.durationSec ?? 0).toDouble(),
-      sourceUri: bridge.ytStreamUrl(v.id),
       artUri: v.thumbnail,
     );
-    return playerService.playQueue([t], 0);
+    return playYtTrack(t);
+  }
+
+  /// Play a YT track and quietly grow the queue into its radio: related tracks
+  /// append behind it, so playback continues like YT Music's autoplay.
+  Future<void> playYtTrack(Track t) async {
+    await playerService.playQueue([t], 0);
+    final id = t.id.startsWith('yt:') ? t.id.substring(3) : t.id;
+    try {
+      final related = await yt.tube.related(id);
+      // The user may have moved on while we fetched — only extend if this
+      // track still owns the queue.
+      if (playerService.currentTrack?.id != t.id) return;
+      var added = 0;
+      for (final item in related) {
+        final rt = item.toTrack();
+        if (rt == null || rt.id == t.id) continue;
+        await playerService.addToQueue(rt);
+        if (++added >= 20) break;
+      }
+    } catch (_) {} // radio is a bonus — the tapped track already plays
+  }
+
+  /// Play any YT Music item: songs start radio; albums/playlists/artists fetch
+  /// their tracks and replace the queue.
+  Future<void> playYtItem(YtMusicItem item) async {
+    final t = item.toTrack();
+    if (t != null) return playYtTrack(t);
+    final shelves = item.playlistId != null
+        ? await yt.tube.playlist(item.playlistId!)
+        : item.browseId != null
+            ? await yt.tube.browsePage(item.browseId!)
+            : const <YtShelf>[];
+    final tracks = <Track>[];
+    final seen = <String>{};
+    for (final s in shelves) {
+      for (final i in s.items) {
+        final rt = i.toTrack();
+        if (rt != null && seen.add(rt.id)) tracks.add(rt);
+      }
+    }
+    if (tracks.isNotEmpty) await playerService.playQueue(tracks, 0);
   }
 }
 

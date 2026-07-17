@@ -119,6 +119,20 @@ class ArtPlaceholder extends StatelessWidget {
   }
 }
 
+/// Cached network image with the shared placeholder — used for YouTube
+/// thumbnails (http URLs that never map to a Track/artUri).
+class NetworkArt extends StatelessWidget {
+  final String url;
+  const NetworkArt({super.key, required this.url});
+  @override
+  Widget build(BuildContext context) => CachedNetworkImage(
+        imageUrl: url,
+        fit: BoxFit.cover,
+        placeholder: (_, _) => const ColoredBox(color: PA.card),
+        errorWidget: (_, _, _) => ArtPlaceholder(seed: url),
+      );
+}
+
 class ErrorView extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;

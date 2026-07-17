@@ -11,6 +11,7 @@ import '../queues_store.dart';
 import '../recommendations.dart';
 import '../theme.dart';
 import 'collection_menu.dart';
+import 'yt_shelf_row.dart';
 import 'dialogs.dart';
 import 'library_tab.dart';
 import 'playlists_ui.dart';
@@ -60,6 +61,7 @@ class _HomeTabState extends State<HomeTab> {
         s.playlists,
         s.queues,
         s.recommendations,
+        s.yt,
       ]),
       builder: (context, _) {
         _recompute(s);
@@ -116,6 +118,11 @@ class _HomeTabState extends State<HomeTab> {
               if (showReco)
                 for (final shelf in s.recommendations.shelves)
                   _RecoShelfView(shelf: shelf),
+
+              // Personalized YouTube Music shelves (your feed, when signed in).
+              if (showReco)
+                for (final shelf in s.yt.homeShelves.take(8))
+                  SliverToBoxAdapter(child: YtShelfRow(shelf: shelf)),
 
               if (showLocal && recent.isNotEmpty)
                 _Shelf(

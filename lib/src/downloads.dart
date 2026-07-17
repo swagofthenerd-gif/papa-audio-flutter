@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'bridge.dart';
 import 'models.dart';
+import 'yt/yt_service.dart';
 
 /// Tracks downloaded from the bridge onto the phone, for offline playback.
 /// Files live in the app's documents dir (no storage permission needed) with a
@@ -140,6 +141,91 @@ class DownloadManager extends ChangeNotifier {
     // bandwidth and slow every track down.
     for (final t in album.tracks) {
       await download(t, bridge);
+    }
+  }
+
+  /// On-device YouTube download: resolve the stream URL, save the audio to the
+  /// same downloads dir (offline playback via [sourceUri]), fetch the thumbnail
+  /// as art. Mirrors [download] but sources bytes from YT instead of the bridge.
+  Future<void> downloadYt(Track t, YtStreamResolver resolver) async {
+    if (isDownloaded(t.id) || progress.containsKey(t.id)) return;
+    final videoId = t.id.startsWith('yt:') ? t.id.substring(3) : t.id;
+    final dir = await _downloadsDir();
+    progress[t.id] = 0;
+    failed.remove(t.id);
+    notifyListeners();
+
+    final base = _safeName(t.id);
+    final unique = '${base}_${t.id.hashCode.toUnsigned(20).toRadixString(16)}';
+    final client = http.Client();
+    File? audioFile;
+    try {
+      final stream = await resolver.resolve(videoId);
+      final ext = stream.mime.contains('webm') ? '.webm' : '.m4a';
+      audioFile = File('${dir.path}${Platform.pathSeparator}$unique$ext');
+      final req = http.Request('GET', Uri.parse(stream.url));
+      final resp = await client.send(req).timeout(const Duration(minutes: 5));
+      if (resp.statusCode != 200) throw 'HTTP ${resp.statusCode}';
+      final total = stream.contentLength ?? resp.contentLength ?? 0;
+      var received = 0;
+      final sink = audioFile.openWrite();
+      try {
+        await for (final chunk
+            in resp.stream.timeout(const Duration(seconds: 60))) {
+          sink.add(chunk);
+          received += chunk.length;
+          if (total > 0) {
+            progress[t.id] = received / total;
+            final now = DateTime.now().millisecondsSinceEpoch;
+            if (now - _lastProgressNotify >= 250) {
+              _lastProgressNotify = now;
+              notifyListeners();
+            }
+          }
+        }
+      } finally {
+        await sink.close();
+      }
+
+      // Thumbnail (best-effort) — the YT art URL is a plain http image.
+      String? artFileName;
+      final artUrl = t.artUri;
+      if (artUrl != null && artUrl.startsWith('http')) {
+        try {
+          final r = await http.get(Uri.parse(artUrl))
+              .timeout(const Duration(seconds: 20));
+          if (r.statusCode == 200 && r.bodyBytes.isNotEmpty) {
+            artFileName = '$unique.art.jpg';
+            await File('${dir.path}${Platform.pathSeparator}$artFileName')
+                .writeAsBytes(r.bodyBytes);
+          }
+        } catch (_) {}
+      }
+
+      downloaded.add(Track(
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        album: t.album,
+        filePath: t.filePath,
+        duration: t.duration,
+        sourceUri: audioFile.uri.toString(),
+        artUri: artFileName != null
+            ? File('${dir.path}${Platform.pathSeparator}$artFileName').uri.toString()
+            : artUrl,
+      ));
+      await _saveIndex();
+    } catch (e) {
+      failed[t.id] = e.toString();
+      try {
+        if (audioFile != null && await audioFile.exists()) {
+          await audioFile.delete();
+        }
+      } catch (_) {}
+    } finally {
+      client.close();
+      progress.remove(t.id);
+      notifyListeners();
     }
   }
 

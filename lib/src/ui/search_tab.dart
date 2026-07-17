@@ -6,12 +6,14 @@ import '../../main.dart' show Shell;
 import '../app_state.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../yt/yt_models.dart';
 import 'widgets.dart';
+import 'yt_login_screen.dart';
+import 'yt_shelf_row.dart';
 
-enum _Source { soulseek, youtube }
-
-/// Search across the bridge's two acquisition paths: Soulseek (downloads run
-/// on the PC) and YouTube (stream now, or download to the PC library).
+/// Explore: music discovery (YouTube Music) plus the acquisition search paths.
+/// Browsing (mixes, charts, moods, your feed) is the default landing; a search
+/// box switches to results across YT Music, Soulseek, and PC YouTube.
 class SearchTab extends StatefulWidget {
   const SearchTab({super.key});
   @override
@@ -20,29 +22,202 @@ class SearchTab extends StatefulWidget {
 
 class _SearchTabState extends State<SearchTab> {
   final _ctrl = TextEditingController();
-  _Source _source = _Source.soulseek;
-  bool _busy = false;
-  List<SlskFolder> _slskResults = [];
-  List<YtResult> _ytResults = [];
+  String _query = '';
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+          child: TextField(
+            controller: _ctrl,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (v) => setState(() => _query = v.trim()),
+            decoration: InputDecoration(
+              hintText: 'Search songs, albums, artists…',
+              filled: true,
+              fillColor: PA.card,
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _query.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        _ctrl.clear();
+                        setState(() => _query = '');
+                      }),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(PA.rLg),
+                  borderSide: BorderSide.none),
+            ),
+          ),
+        ),
+        Expanded(
+          child: _query.isEmpty
+              ? const _ExploreBrowse()
+              : _SearchResults(query: _query),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Browse (default landing) ──────────────────────────────────────────────────
+
+class _ExploreBrowse extends StatefulWidget {
+  const _ExploreBrowse();
+  @override
+  State<_ExploreBrowse> createState() => _ExploreBrowseState();
+}
+
+class _ExploreBrowseState extends State<_ExploreBrowse> {
+  List<YtShelf> _shelves = const [];
+  bool _loading = true;
   String? _error;
 
-  Future<void> _search() async {
-    final q = _ctrl.text.trim();
-    if (q.isEmpty) return;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final tube = context.read<AppState>().yt.tube;
+    try {
+      // Explore surface first (charts, new releases, moods); fall back to home.
+      var shelves = await tube.explore();
+      if (shelves.isEmpty) shelves = await tube.home();
+      if (mounted) setState(() {
+            _shelves = shelves;
+            _loading = false;
+          });
+    } catch (e) {
+      if (mounted) setState(() {
+            _error = e.toString();
+            _loading = false;
+          });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AppState>();
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: PA.accent));
+    }
+    return RefreshIndicator(
+      color: PA.accent,
+      onRefresh: _load,
+      child: ListView(
+        children: [
+          if (!s.ytAuth.signedIn) const _SignInBanner(),
+          if (_error != null && _shelves.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  const Icon(Icons.explore_off, color: PA.textMuted, size: 48),
+                  const SizedBox(height: 12),
+                  Text('Couldn\'t load YouTube Music.\n$_error',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: PA.textSecondary)),
+                  const SizedBox(height: 12),
+                  OutlinedButton(onPressed: _load, child: const Text('Retry')),
+                ],
+              ),
+            ),
+          for (final shelf in _shelves) YtShelfRow(shelf: shelf),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+class _SignInBanner extends StatelessWidget {
+  const _SignInBanner();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+          color: PA.card, borderRadius: BorderRadius.circular(PA.rMd)),
+      child: Row(
+        children: [
+          const Icon(Icons.account_circle, color: PA.accent, size: 32),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text('Sign in to YouTube Music for your personalized mixes '
+                'and recommendations.',
+                style: TextStyle(fontSize: 13)),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: PA.accent, foregroundColor: Colors.black),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const YtLoginScreen())),
+            child: const Text('Sign in'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Search results ────────────────────────────────────────────────────────────
+
+class _SearchResults extends StatefulWidget {
+  final String query;
+  const _SearchResults({required this.query});
+  @override
+  State<_SearchResults> createState() => _SearchResultsState();
+}
+
+class _SearchResultsState extends State<_SearchResults> {
+  int _source = 0; // 0 YT Music, 1 Soulseek, 2 PC YouTube
+  bool _busy = false;
+  String? _error;
+  List<YtShelf> _yt = const [];
+  List<SlskFolder> _slsk = const [];
+  List<YtResult> _pcYt = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SearchResults old) {
+    super.didUpdateWidget(old);
+    if (old.query != widget.query) _run();
+  }
+
+  Future<void> _run() async {
     setState(() {
       _busy = true;
       _error = null;
-      _slskResults = [];
-      _ytResults = [];
     });
+    final s = context.read<AppState>();
     try {
-      final bridge = context.read<AppState>().bridge;
-      if (_source == _Source.soulseek) {
-        final r = await bridge.slskSearch(q);
-        if (mounted) setState(() => _slskResults = r);
+      if (_source == 0) {
+        final r = await s.yt.tube.search(widget.query);
+        if (mounted) setState(() => _yt = r);
+      } else if (_source == 1) {
+        final r = await s.bridge.slskSearch(widget.query);
+        if (mounted) setState(() => _slsk = r);
       } else {
-        final r = await bridge.ytSearch(q);
-        if (mounted) setState(() => _ytResults = r);
+        final r = await s.bridge.ytSearch(widget.query);
+        if (mounted) setState(() => _pcYt = r);
       }
     } catch (e) {
       if (mounted) setState(() => _error = 'Search failed: $e');
@@ -56,27 +231,8 @@ class _SearchTabState extends State<SearchTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-          child: TextField(
-            controller: _ctrl,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _search(),
-            decoration: InputDecoration(
-              hintText: _source == _Source.soulseek
-                  ? 'Search Soulseek…'
-                  : 'Search YouTube…',
-              filled: true,
-              fillColor: PA.card,
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: IconButton(
-                  icon: const Icon(Icons.arrow_forward), onPressed: _search),
-              border: const OutlineInputBorder(borderSide: BorderSide.none),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: SegmentedButton<_Source>(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: SegmentedButton<int>(
             style: SegmentedButton.styleFrom(
               backgroundColor: PA.card,
               foregroundColor: PA.textSecondary,
@@ -85,17 +241,15 @@ class _SearchTabState extends State<SearchTab> {
               side: BorderSide.none,
             ),
             segments: const [
-              ButtonSegment(
-                  value: _Source.soulseek,
-                  label: Text('Soulseek'),
-                  icon: Icon(Icons.folder_shared_outlined)),
-              ButtonSegment(
-                  value: _Source.youtube,
-                  label: Text('YouTube'),
-                  icon: Icon(Icons.smart_display_outlined)),
+              ButtonSegment(value: 0, label: Text('YT Music')),
+              ButtonSegment(value: 1, label: Text('Soulseek')),
+              ButtonSegment(value: 2, label: Text('PC YouTube')),
             ],
             selected: {_source},
-            onSelectionChanged: (s) => setState(() => _source = s.first),
+            onSelectionChanged: (v) {
+              setState(() => _source = v.first);
+              _run();
+            },
           ),
         ),
         if (_busy)
@@ -107,12 +261,17 @@ class _SearchTabState extends State<SearchTab> {
             child: Text(_error!,
                 style: const TextStyle(color: PA.textSecondary, fontSize: 12)),
           ),
-        Expanded(
-          child: _source == _Source.soulseek
-              ? _SlskResults(results: _slskResults)
-              : _YtResults(results: _ytResults),
-        ),
+        Expanded(child: _results()),
       ],
+    );
+  }
+
+  Widget _results() {
+    if (_source == 1) return _SlskResults(results: _slsk);
+    if (_source == 2) return _PcYtResults(results: _pcYt);
+    // YT Music: flatten shelves (songs first) into a scrollable list of cards.
+    return ListView(
+      children: [for (final shelf in _yt) YtShelfRow(shelf: shelf)],
     );
   }
 }
@@ -153,9 +312,9 @@ class _SlskResults extends StatelessWidget {
   }
 }
 
-class _YtResults extends StatelessWidget {
+class _PcYtResults extends StatelessWidget {
   final List<YtResult> results;
-  const _YtResults({required this.results});
+  const _PcYtResults({required this.results});
 
   @override
   Widget build(BuildContext context) {
@@ -165,7 +324,7 @@ class _YtResults extends StatelessWidget {
         final v = results[i];
         return ListTile(
           leading: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(PA.rSm),
             child: SizedBox(
               width: 56,
               height: 56,

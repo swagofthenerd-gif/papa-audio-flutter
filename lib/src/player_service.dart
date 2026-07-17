@@ -12,6 +12,7 @@ import 'history.dart';
 import 'local_library.dart';
 import 'models.dart';
 import 'settings.dart';
+import 'yt/yt_service.dart';
 
 /// Native gapless playback via just_audio + a background/lock-screen handler.
 /// This is the layer that gives the "buttery" feel — audio runs on the platform
@@ -32,6 +33,10 @@ class PlayerService {
 
   HistoryService? history;
   SettingsService? settings;
+
+  /// On-device YouTube stream resolution. When set, `yt:` tracks without a
+  /// sourceUri play through a lazy resolving source instead of the PC bridge.
+  YtStreamResolver? ytResolver;
 
   /// Notified whenever a brand-new queue starts (for the saved-queues archive).
   void Function(List<Track>)? onNewQueue;
@@ -68,6 +73,7 @@ class PlayerService {
     // transition fades are on, each new track opens with a short fade-in.
     _player.currentIndexStream.listen((i) {
       _lastInsert = null;
+      _prefetchUpcomingYt(i);
       if (_pendingNextKey != null &&
           i != null &&
           i >= 0 &&
@@ -117,20 +123,39 @@ class PlayerService {
   /// Where the audio actually comes from: an explicit URI (local file,
   /// MediaStore content://, YouTube stream) or the bridge's /stream endpoint.
   AudioSource _sourceFor(Track t) {
-    final url = t.sourceUri ?? bridge.streamUrl(t.filePath);
-    return AudioSource.uri(
-      Uri.parse(url),
-      tag: MediaItem(
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        album: t.album,
-        duration: t.duration > 0
-            ? Duration(milliseconds: (t.duration * 1000).round())
-            : null,
-        artUri: _artUriFor(t),
-      ),
+    final tag = MediaItem(
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      album: t.album,
+      duration: t.duration > 0
+          ? Duration(milliseconds: (t.duration * 1000).round())
+          : null,
+      artUri: _artUriFor(t),
     );
+    // On-device YouTube: resolve the stream lazily at play time, so enqueuing
+    // a 30-track mix costs nothing up front.
+    final resolver = ytResolver;
+    if (resolver != null && t.sourceUri == null && t.id.startsWith('yt:')) {
+      return YtLazyAudioSource(t.id.substring(3), resolver, tag: tag);
+    }
+    final url = t.sourceUri ?? bridge.streamUrl(t.filePath);
+    return AudioSource.uri(Uri.parse(url), tag: tag);
+  }
+
+  /// Warm stream URLs for the next queue entries so YT track changes are
+  /// gapless-feeling. Called on every index change.
+  void _prefetchUpcomingYt(int? index) {
+    final resolver = ytResolver;
+    if (resolver == null || index == null) return;
+    final ids = <String>[];
+    for (var i = index; i < _queue.length && ids.length < 3; i++) {
+      final t = _queue[i];
+      if (t.sourceUri == null && t.id.startsWith('yt:')) {
+        ids.add(t.id.substring(3));
+      }
+    }
+    resolver.prefetch(ids);
   }
 
   /// Lock-screen artwork URI. `localart://` is an in-app convention, so it maps

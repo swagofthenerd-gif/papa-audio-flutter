@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../settings.dart';
 import '../theme.dart';
+import '../yt/yt_login_screen.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
 import 'stats_screen.dart';
@@ -25,6 +26,36 @@ class SettingsScreen extends StatelessWidget {
         builder: (context, _) => ListView(
           padding: const EdgeInsets.only(bottom: 40),
           children: [
+            const _Section('YouTube Music'),
+            AnimatedBuilder(
+              animation: s.ytAuth,
+              builder: (context, _) => ListTile(
+                leading: Icon(
+                    s.ytAuth.signedIn
+                        ? Icons.account_circle
+                        : Icons.account_circle_outlined,
+                    color: s.ytAuth.signedIn ? PA.accent : PA.textSecondary),
+                title: Text(s.ytAuth.signedIn ? 'Signed in' : 'Sign in'),
+                subtitle: Text(
+                    s.ytAuth.signedIn
+                        ? 'Personalized mixes & recommendations are on'
+                        : 'Connect your account for personalized recommendations',
+                    style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+                trailing: s.ytAuth.signedIn
+                    ? TextButton(
+                        onPressed: () async {
+                          await s.ytAuth.signOut();
+                          await s.yt.onAuthChanged();
+                        },
+                        child: const Text('Sign out'),
+                      )
+                    : const Icon(Icons.chevron_right, color: PA.textSecondary),
+                onTap: s.ytAuth.signedIn
+                    ? null
+                    : () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const YtLoginScreen())),
+              ),
+            ),
             const _Section('Playback'),
             ListTile(
               leading: const Icon(Icons.equalizer, color: PA.textSecondary),

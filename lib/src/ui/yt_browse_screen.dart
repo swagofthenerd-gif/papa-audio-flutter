@@ -5,6 +5,7 @@ import '../app_state.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../yt/yt_models.dart';
+import 'dialogs.dart';
 import 'widgets.dart';
 import 'yt_shelf_row.dart';
 
@@ -189,5 +190,6 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: PA.textSecondary)),
         onTap: () => s.playerService.playQueue(tracks, i),
+        onLongPress: () => showTrackMenu(context, tracks[i]),
       );
 }

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../theme.dart';
 import '../yt/yt_models.dart';
+import 'dialogs.dart';
 import 'widgets.dart';
 import 'yt_browse_screen.dart';
 
@@ -63,7 +64,8 @@ class YtItemCard extends StatelessWidget {
             ? null
             : () {
                 HapticFeedback.selectionClick();
-                s.playYtItem(item);
+                final t = item.toTrack();
+                if (t != null) showTrackMenu(context, t);
               },
         child: SizedBox(
           width: size,

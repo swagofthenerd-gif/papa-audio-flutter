@@ -21,6 +21,7 @@ void showTrackMenu(BuildContext context, Track t) {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
     builder: (sheetCtx) {
       final fav = s.playlists.isFavorite(t);
+      final isYt = t.id.startsWith('yt:');
       final canDownload =
           t.sourceUri == null && t.filePath.isNotEmpty && s.configured;
       return SafeArea(
@@ -53,6 +54,15 @@ void showTrackMenu(BuildContext context, Track t) {
                 Navigator.pop(sheetCtx);
               },
             ),
+            if (isYt)
+              _MenuItem(
+                icon: Icons.radio,
+                label: 'Start radio',
+                onTap: () {
+                  s.playYtTrack(t);
+                  Navigator.pop(sheetCtx);
+                },
+              ),
             _MenuItem(
               icon: fav ? Icons.favorite : Icons.favorite_border,
               label: fav ? 'Remove from favorites' : 'Add to favorites',
@@ -94,6 +104,17 @@ void showTrackMenu(BuildContext context, Track t) {
                 onTap: () {
                   s.downloads.download(t, s.bridge);
                   Navigator.pop(sheetCtx);
+                },
+              ),
+            if (isYt)
+              _MenuItem(
+                icon: Icons.download_outlined,
+                label: 'Download to this phone',
+                onTap: () {
+                  s.downloads.downloadYt(t, s.yt.resolver);
+                  Navigator.pop(sheetCtx);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Downloading — see the Downloads tab')));
                 },
               ),
             _MenuItem(

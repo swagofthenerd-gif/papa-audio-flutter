@@ -39,10 +39,24 @@ jobs:
       - name: Build debug APK
         run: flutter build apk --debug
 
-      - name: Upload APK
+      - name: Upload debug APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: papa-audio-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: warn
+
+      # Release build too, for a distributable APK. NOTE: still debug-signed
+      # until a real keystore is configured (see android/app/build.gradle.kts) —
+      # installable and testable, but not Play-Store-ready.
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload release APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: papa-audio-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: warn

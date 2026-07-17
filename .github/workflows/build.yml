@@ -36,6 +36,20 @@ jobs:
       - name: Test
         run: flutter test || true
 
+      # Pre-install the NDK explicitly with retries. AGP's in-build auto-install
+      # occasionally fetches a corrupted archive ("not a ZIP archive"); doing it
+      # here with retry makes the build deterministic.
+      - name: Pre-install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="sdkmanager"
+          for i in 1 2 3; do
+            yes | "$SDKMANAGER" "ndk;27.0.12077973" && exit 0
+            echo "NDK install attempt $i failed; retrying in 10s"; sleep 10
+          done
+          exit 1
+
       - name: Build debug APK
         run: flutter build apk --debug
 

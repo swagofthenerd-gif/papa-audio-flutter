@@ -20,7 +20,7 @@ class DownloadsTab extends StatefulWidget {
 class _DownloadsTabState extends State<DownloadsTab> {
   Timer? _poll;
   List<dynamic> _transfers = [];
-  ValueListenable<TickerModeData>? _visible; // TickerMode notifier from the shell
+  ValueListenable<bool>? _visible; // TickerMode notifier from the shell
   AppLifecycleListener? _lifecycle;
 
   @override
@@ -38,12 +38,12 @@ class _DownloadsTabState extends State<DownloadsTab> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _visible?.removeListener(_syncPolling);
-    _visible = TickerMode.getValuesNotifier(context)..addListener(_syncPolling);
+    _visible = TickerMode.getNotifier(context)..addListener(_syncPolling);
     _syncPolling();
   }
 
   void _syncPolling() {
-    final shouldRun = _visible?.value.enabled ?? false;
+    final shouldRun = _visible?.value ?? false;
     if (shouldRun && _poll == null) {
       _refreshTransfers();
       _poll = Timer.periodic(

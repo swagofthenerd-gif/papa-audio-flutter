@@ -6,7 +6,7 @@ import '../theme.dart';
 import '../yt/innertube.dart';
 import '../yt/yt_models.dart';
 import 'widgets.dart';
-import 'yt_login_screen.dart';
+import '../yt/yt_login_screen.dart';
 import 'yt_shelf_row.dart';
 
 /// The signed-in user's YouTube Music library: playlists, subscriptions, liked

@@ -9,7 +9,7 @@ import '../theme.dart';
 import '../yt/yt_models.dart';
 import 'widgets.dart';
 import 'yt_library_screen.dart';
-import 'yt_login_screen.dart';
+import '../yt/yt_login_screen.dart';
 import 'yt_shelf_row.dart';
 
 /// Explore: music discovery (YouTube Music) plus the acquisition search paths.

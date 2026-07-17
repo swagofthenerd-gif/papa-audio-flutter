@@ -142,16 +142,23 @@ class YtStreamResolver {
   final Innertube tube;
   YtStreamResolver(this.tube);
 
+  static const _cap = 128; // bounded LRU — hours of playback can't grow this
   final Map<String, Future<YtStream>> _inFlight = {};
-  final Map<String, YtStream> _cache = {};
+  final Map<String, YtStream> _cache = {}; // insertion-ordered => LRU
 
   Future<YtStream> resolve(String videoId) {
-    final hit = _cache[videoId];
-    if (hit != null && hit.fresh) return Future.value(hit);
+    final hit = _cache.remove(videoId);
+    if (hit != null && hit.fresh) {
+      _cache[videoId] = hit; // re-insert = mark most-recently-used
+      return Future.value(hit);
+    }
     final pending = _inFlight[videoId];
     if (pending != null) return pending;
     final future = tube.playerStream(videoId).then((s) {
       _cache[videoId] = s;
+      while (_cache.length > _cap) {
+        _cache.remove(_cache.keys.first); // evict least-recently-used
+      }
       return s;
     }).whenComplete(() => _inFlight.remove(videoId));
     _inFlight[videoId] = future;

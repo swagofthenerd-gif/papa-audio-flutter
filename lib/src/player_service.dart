@@ -71,6 +71,17 @@ class PlayerService {
     });
     // Chained play-next resets once playback moves to a new track; when
     // transition fades are on, each new track opens with a short fade-in.
+    // A dead stream (region-locked/removed YouTube track, expired URL) must
+    // never halt an hours-long session — skip past it to the next entry.
+    _player.playbackEventStream.listen((_) {}, onError: (Object e, _) async {
+      final i = _player.currentIndex;
+      if (i != null && i + 1 < _queue.length) {
+        try {
+          await _player.seek(Duration.zero, index: i + 1);
+          if (_player.playing) _player.play();
+        } catch (_) {}
+      }
+    });
     _player.currentIndexStream.listen((i) {
       _lastInsert = null;
       _prefetchUpcomingYt(i);

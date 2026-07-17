@@ -121,16 +121,28 @@ class ArtPlaceholder extends StatelessWidget {
 
 /// Cached network image with the shared placeholder — used for YouTube
 /// thumbnails (http URLs that never map to a Track/artUri).
+///
+/// [slotPx] is the logical size of the slot this fills; the image is decoded to
+/// no more than that (× devicePixelRatio, capped), so a wall of 150px cards
+/// never holds full-resolution bitmaps in memory — the difference between a
+/// smooth hours-long browse and a slow OOM crash.
 class NetworkArt extends StatelessWidget {
   final String url;
-  const NetworkArt({super.key, required this.url});
+  final double slotPx;
+  const NetworkArt({super.key, required this.url, this.slotPx = 200});
   @override
-  Widget build(BuildContext context) => CachedNetworkImage(
-        imageUrl: url,
-        fit: BoxFit.cover,
-        placeholder: (_, _) => const ColoredBox(color: PA.card),
-        errorWidget: (_, _, _) => ArtPlaceholder(seed: url),
-      );
+  Widget build(BuildContext context) {
+    final decodePx = (slotPx * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(64, 720);
+    return CachedNetworkImage(
+      imageUrl: url,
+      fit: BoxFit.cover,
+      memCacheWidth: decodePx,
+      placeholder: (_, _) => const ColoredBox(color: PA.card),
+      errorWidget: (_, _, _) => ArtPlaceholder(seed: url),
+    );
+  }
 }
 
 class ErrorView extends StatelessWidget {

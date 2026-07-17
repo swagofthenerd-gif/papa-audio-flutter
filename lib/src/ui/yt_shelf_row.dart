@@ -77,7 +77,7 @@ class YtItemCard extends StatelessWidget {
                   width: size,
                   height: size,
                   child: item.thumbnail != null
-                      ? NetworkArt(url: item.thumbnail!)
+                      ? NetworkArt(url: item.thumbnail!, slotPx: size)
                       : const ArtPlaceholder(),
                 ),
               ),

@@ -1046,7 +1046,10 @@ class _QueueSheetState extends State<_QueueSheet> {
                     scrollController: _scroll,
                     itemExtent: _rowHeight,
                     itemCount: queue.length,
-                    onReorderItem: (from, to) => ps.moveInQueue(from, to),
+                    onReorder: (from, to) {
+                      if (to > from) to -= 1; // ReorderableListView index convention
+                      ps.moveInQueue(from, to);
+                    },
                     itemBuilder: (_, i) {
                       final t = queue[i];
                       final isCurrent = i == current;

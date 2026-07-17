@@ -194,8 +194,10 @@ class PlaylistScreen extends StatelessWidget {
                     : ReorderableListView.builder(
                         padding: const EdgeInsets.only(bottom: 80),
                         itemCount: playlist.tracks.length,
-                        onReorderItem: (from, to) =>
-                            s.playlists.reorder(playlist, from, to),
+                        onReorder: (from, to) {
+                          if (to > from) to -= 1; // ReorderableListView convention
+                          s.playlists.reorder(playlist, from, to);
+                        },
                         itemBuilder: (_, i) {
                           final t = playlist.tracks[i];
                           return Dismissible(

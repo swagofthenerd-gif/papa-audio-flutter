@@ -165,6 +165,13 @@ class YtStreamResolver {
     return future;
   }
 
+  /// Drop a cached stream so the next resolve re-fetches a fresh URL. Used when
+  /// playback of a track fails — most failures are simply expired URLs.
+  void invalidate(String videoId) {
+    _cache.remove(videoId);
+    _inFlight.remove(videoId);
+  }
+
   /// Warm the cache for upcoming queue entries so track changes are instant.
   void prefetch(Iterable<String> videoIds) {
     for (final id in videoIds.take(3)) {

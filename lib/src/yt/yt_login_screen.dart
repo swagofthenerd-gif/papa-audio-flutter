@@ -20,9 +20,10 @@ class YtLoginScreen extends StatefulWidget {
 class _YtLoginScreenState extends State<YtLoginScreen> {
   final _cookieManager = CookieManager.instance();
   bool _finishing = false;
+  bool _blocked = false; // Google refused the embedded webview
 
   static final _loginUrl = WebUri(
-      'https://accounts.google.com/ServiceLogin?service=youtube&continue=https://music.youtube.com/');
+      'https://accounts.google.com/ServiceLogin?service=youtube&hl=en&continue=https://music.youtube.com/');
 
   Future<void> _tryCapture() async {
     if (_finishing) return;
@@ -50,22 +51,74 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
         title: const Text('Sign in to YouTube Music',
             style: TextStyle(fontSize: 17)),
       ),
-      body: InAppWebView(
-        initialUrlRequest: URLRequest(url: _loginUrl),
-        initialSettings: InAppWebViewSettings(
-          // Some Google login checks reject non-desktop UAs; match innertube's.
-          userAgent:
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-              '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-          javaScriptEnabled: true,
-        ),
-        onLoadStop: (controller, url) async {
-          // Once redirected back to music.youtube.com, cookies should be set.
-          if (url != null && url.host.contains('music.youtube.com')) {
-            await _tryCapture();
-          }
-        },
-      ),
+      body: _blocked
+          ? _blockedHelp()
+          : InAppWebView(
+              initialUrlRequest: URLRequest(url: _loginUrl),
+              initialSettings: InAppWebViewSettings(
+                // A recent desktop Chrome UA is the most reliably accepted by
+                // Google's embedded-login checks.
+                userAgent:
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                    '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                javaScriptEnabled: true,
+                thirdPartyCookiesEnabled: true,
+              ),
+              onLoadStop: (controller, url) async {
+                if (url == null) return;
+                // Google's "this browser or app may not be secure" wall.
+                if (url.host.contains('accounts.google.com')) {
+                  final title = (await controller.getTitle() ?? '').toLowerCase();
+                  if (title.contains("couldn't sign you in") ||
+                      title.contains('not secure')) {
+                    if (mounted) setState(() => _blocked = true);
+                    return;
+                  }
+                }
+                // Once redirected back to music.youtube.com, cookies are set.
+                if (url.host.contains('music.youtube.com')) {
+                  await _tryCapture();
+                }
+              },
+            ),
     );
   }
+
+  Widget _blockedHelp() => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.gpp_maybe_outlined, color: PA.warning, size: 56),
+            const SizedBox(height: 16),
+            const Text('Google blocked in-app sign-in',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text(
+                'Google sometimes refuses to sign in from an embedded browser. '
+                'You can still browse and search YouTube Music without signing '
+                'in — only your personalized recommendations need an account. '
+                'Try again in a moment, or continue signed out.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: PA.textSecondary)),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                OutlinedButton(
+                  onPressed: () => setState(() => _blocked = false),
+                  child: const Text('Try again'),
+                ),
+                const SizedBox(width: 12),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                      backgroundColor: PA.accent, foregroundColor: Colors.black),
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Continue signed out'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
 }

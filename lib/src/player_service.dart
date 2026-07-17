@@ -37,6 +37,7 @@ class PlayerService {
   /// On-device YouTube stream resolution. When set, `yt:` tracks without a
   /// sourceUri play through a lazy resolving source instead of the PC bridge.
   YtStreamResolver? ytResolver;
+  int? _errorRetryIndex; // queue index we've already retried after a stream error
 
   /// Notified whenever a brand-new queue starts (for the saved-queues archive).
   void Function(List<Track>)? onNewQueue;
@@ -72,18 +73,31 @@ class PlayerService {
     // Chained play-next resets once playback moves to a new track; when
     // transition fades are on, each new track opens with a short fade-in.
     // A dead stream (region-locked/removed YouTube track, expired URL) must
-    // never halt an hours-long session — skip past it to the next entry.
+    // never halt an hours-long session. Most failures are expired URLs, so for
+    // a YouTube track try ONE fresh-URL retry of the same track before giving
+    // up and skipping to the next entry.
     _player.playbackEventStream.listen((_) {}, onError: (Object e, _) async {
       final i = _player.currentIndex;
-      if (i != null && i + 1 < _queue.length) {
-        try {
+      if (i == null || i < 0 || i >= _queue.length) return;
+      final t = _queue[i];
+      final isYt = t.sourceUri == null && t.id.startsWith('yt:');
+      try {
+        if (isYt && _errorRetryIndex != i) {
+          _errorRetryIndex = i; // one retry per track occurrence
+          ytResolver?.invalidate(t.id.substring(3));
+          await _player.seek(Duration.zero, index: i); // re-request fresh URL
+          if (_player.playing) _player.play();
+          return;
+        }
+        if (i + 1 < _queue.length) {
           await _player.seek(Duration.zero, index: i + 1);
           if (_player.playing) _player.play();
-        } catch (_) {}
-      }
+        }
+      } catch (_) {}
     });
     _player.currentIndexStream.listen((i) {
       _lastInsert = null;
+      if (_errorRetryIndex != i) _errorRetryIndex = null; // moved on — re-arm retry
       _prefetchUpcomingYt(i);
       if (_pendingNextKey != null &&
           i != null &&

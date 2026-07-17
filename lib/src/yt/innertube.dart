@@ -42,18 +42,30 @@ class Innertube {
 
   Future<Map<String, dynamic>> _post(
       String path, Map<String, dynamic> body) async {
-    final resp = await _client
-        .post(
-          Uri.parse('$_base/$path?prettyPrint=false'),
-          headers: auth.headers(),
-          body: jsonEncode({'context': _webContext(), ...body}),
-        )
-        .timeout(const Duration(seconds: 20));
-    if (resp.statusCode != 200) {
-      throw YtException('YT ${resp.statusCode} on /$path');
+    // Two tries with a short backoff: transient 5xx / network blips are common
+    // and a single retry turns most of them into a normal load.
+    YtException? last;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await Future.delayed(const Duration(milliseconds: 400));
+      try {
+        final resp = await _client
+            .post(
+              Uri.parse('$_base/$path?prettyPrint=false'),
+              headers: auth.headers(),
+              body: jsonEncode({'context': _webContext(), ...body}),
+            )
+            .timeout(const Duration(seconds: 20));
+        if (resp.statusCode == 200) {
+          // Megabytes of JSON — decode off the UI isolate.
+          return await compute(_decodeMap, resp.body);
+        }
+        last = YtException('YT ${resp.statusCode} on /$path');
+        if (resp.statusCode < 500 && resp.statusCode != 429) break; // not transient
+      } catch (e) {
+        last = YtException('YT /$path failed: $e');
+      }
     }
-    // Feed responses are megabytes of JSON — decode off the UI isolate.
-    return await compute(_decodeMap, resp.body);
+    throw last ?? YtException('YT /$path failed');
   }
 
   Future<Map<String, dynamic>> browseRaw(String browseId,
@@ -165,26 +177,33 @@ class Innertube {
 
   // ── Player (stream resolution) ─────────────────────────────────────────────
 
-  /// Resolve a direct audio stream. Uses the ANDROID_MUSIC identity, whose
-  /// /player responses carry plain URLs (no signature deciphering step).
-  Future<YtStream> playerStream(String videoId) async {
-    final headers = auth.headers()
-      ..['user-agent'] =
-          'com.google.android.apps.youtube.music/7.11.51 (Linux; U; Android 14) gzip';
+  // The two /player client identities whose responses carry plain (uncphered)
+  // URLs. ANDROID_MUSIC is tried first; some tracks only expose a usable format
+  // to one client, so IOS is the fallback.
+  static const _androidMusicClient = {
+    'clientName': 'ANDROID_MUSIC',
+    'clientVersion': '7.11.51',
+    'androidSdkVersion': 34,
+    'hl': 'en',
+    'gl': 'US',
+  };
+  static const _iosClient = {
+    'clientName': 'IOS',
+    'clientVersion': '19.29.1',
+    'deviceModel': 'iPhone16,2',
+    'hl': 'en',
+    'gl': 'US',
+  };
+
+  Future<Map<String, dynamic>> _playerJson(
+      String videoId, Map<String, dynamic> client, String userAgent) async {
+    final headers = auth.headers()..['user-agent'] = userAgent;
     final resp = await _client
         .post(
           Uri.parse('$_base/player?prettyPrint=false'),
           headers: headers,
           body: jsonEncode({
-            'context': {
-              'client': {
-                'clientName': 'ANDROID_MUSIC',
-                'clientVersion': '7.11.51',
-                'androidSdkVersion': 34,
-                'hl': 'en',
-                'gl': 'US',
-              }
-            },
+            'context': {'client': client},
             'videoId': videoId,
             'contentCheckOk': true,
             'racyCheckOk': true,
@@ -192,14 +211,65 @@ class Innertube {
         )
         .timeout(const Duration(seconds: 20));
     if (resp.statusCode != 200) {
-      throw YtException('YT player ${resp.statusCode}');
+      throw YtException('YT player ${resp.statusCode}', videoId: videoId);
     }
     final json = await compute(_decodeMap, resp.body);
     final status = json['playabilityStatus']?['status'];
     if (status != null && status != 'OK') {
-      throw YtException('Not playable: $status '
-          '${json['playabilityStatus']?['reason'] ?? ''}');
+      // Typed so callers can distinguish "sign in", "region blocked", "gone".
+      throw YtException.playability(
+          status.toString(), json['playabilityStatus']?['reason']?.toString(),
+          videoId: videoId);
     }
+    return json;
+  }
+
+  /// Resolve a direct audio stream — ANDROID_MUSIC, then IOS fallback.
+  Future<YtStream> playerStream(String videoId) async {
+    YtException? last;
+    for (final client in [
+      (_androidMusicClient,
+          'com.google.android.apps.youtube.music/7.11.51 (Linux; U; Android 14) gzip'),
+      (_iosClient,
+          'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5 like Mac OS X)'),
+    ]) {
+      try {
+        final json = await _playerJson(videoId, client.$1, client.$2);
+        final s = _bestAudio(json);
+        if (s != null) return s;
+        last = YtException('No direct audio stream', videoId: videoId);
+      } on YtException catch (e) {
+        last = e;
+        if (e.playabilityStatus != null) break; // a real block — fallback won't help
+      }
+    }
+    throw last ?? YtException('No stream', videoId: videoId);
+  }
+
+  /// Resolve a muxed (audio+video) stream URL for the video toggle. Muxed
+  /// formats live in `formats` (e.g. itag 18, 360p) and carry their own audio.
+  Future<String?> playerVideo(String videoId) async {
+    try {
+      final json = await _playerJson(videoId, _iosClient,
+          'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5 like Mac OS X)');
+      final sd = json['streamingData'] as Map<String, dynamic>?;
+      Map<String, dynamic>? best;
+      for (final f in (sd?['formats'] as List? ?? [])) {
+        if (f is! Map<String, dynamic>) continue;
+        final mime = (f['mimeType'] ?? '').toString();
+        if (!mime.startsWith('video/') || f['url'] == null) continue;
+        if (best == null ||
+            ((f['width'] as num?) ?? 0) > ((best['width'] as num?) ?? 0)) {
+          best = f;
+        }
+      }
+      return best?['url'] as String?;
+    } catch (_) {
+      return null; // video is optional — caller keeps audio
+    }
+  }
+
+  static YtStream? _bestAudio(Map<String, dynamic> json) {
     final sd = json['streamingData'] as Map<String, dynamic>?;
     final formats = [
       ...?(sd?['adaptiveFormats'] as List?),
@@ -210,13 +280,13 @@ class Innertube {
       if (f is! Map<String, dynamic>) continue;
       final mime = (f['mimeType'] ?? '').toString();
       if (!mime.startsWith('audio/')) continue;
-      if (f['url'] == null) continue; // ciphered — skip, another format won't be
+      if (f['url'] == null) continue; // ciphered — skip
       if (best == null ||
           ((f['bitrate'] as num?) ?? 0) > ((best['bitrate'] as num?) ?? 0)) {
         best = f;
       }
     }
-    if (best == null) throw YtException('No direct audio stream');
+    if (best == null) return null;
     final expiresIn =
         int.tryParse('${sd?['expiresInSeconds'] ?? ''}') ?? 6 * 3600;
     return YtStream(
@@ -463,7 +533,26 @@ class YtPage {
 
 class YtException implements Exception {
   final String message;
-  YtException(this.message);
+  final String? videoId;
+
+  /// Non-null when YouTube reported a playabilityStatus other than OK
+  /// (LOGIN_REQUIRED, UNPLAYABLE, LIVE_STREAM_OFFLINE, ERROR…). Callers use it
+  /// to show the right message instead of a generic failure.
+  final String? playabilityStatus;
+
+  YtException(this.message, {this.videoId}) : playabilityStatus = null;
+
+  YtException.playability(this.playabilityStatus, String? reason,
+      {this.videoId})
+      : message = reason == null || reason.isEmpty
+            ? 'Not playable ($playabilityStatus)'
+            : reason;
+
+  /// True when signing in would likely fix it.
+  bool get needsSignIn =>
+      playabilityStatus == 'LOGIN_REQUIRED' ||
+      playabilityStatus == 'AGE_VERIFICATION_REQUIRED';
+
   @override
   String toString() => message;
 }

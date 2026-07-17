@@ -76,6 +76,24 @@ class Innertube {
         if (playlistId != null) 'playlistId': playlistId,
       });
 
+  /// Fetch the next page of a surface via its continuation token.
+  Future<YtPage> continued(String token) async {
+    final json = await _post('browse', {'continuation': token});
+    return YtPage(
+      shelves: parseShelves(json),
+      continuation: _findContinuation(json),
+    );
+  }
+
+  /// Browse a surface and also surface its continuation token for paging.
+  Future<YtPage> browsePaged(String browseId, {String? params}) async {
+    final json = await browseRaw(browseId, params: params);
+    return YtPage(
+      shelves: parseShelves(json),
+      continuation: _findContinuation(json),
+    );
+  }
+
   // ── Surfaces ───────────────────────────────────────────────────────────────
 
   /// The signed-in user's YT Music home feed (mixes, listen again, made for
@@ -419,6 +437,28 @@ class Innertube {
     final last = thumbs.last;
     return last is Map ? last['url']?.toString() : null;
   }
+
+  /// First continuation token anywhere in the response (YT nests it under
+  /// several renderer-specific keys; the token itself is always `continuation`).
+  static String? _findContinuation(Map<String, dynamic> root) {
+    String? found;
+    _walk(root, (key, node) {
+      if (found != null) return;
+      if (key == 'continuationItemRenderer' || key == 'nextContinuationData') {
+        found = _findFirst(node, 'token')?.toString() ??
+            _findFirst(node, 'continuation')?.toString();
+      }
+    });
+    return found;
+  }
+}
+
+/// A page of shelves plus the token to fetch the next page (null when the
+/// surface is exhausted).
+class YtPage {
+  final List<YtShelf> shelves;
+  final String? continuation;
+  const YtPage({required this.shelves, this.continuation});
 }
 
 class YtException implements Exception {

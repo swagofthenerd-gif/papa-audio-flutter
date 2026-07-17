@@ -8,6 +8,7 @@ import '../models.dart';
 import '../theme.dart';
 import '../yt/yt_models.dart';
 import 'widgets.dart';
+import 'yt_library_screen.dart';
 import 'yt_login_screen.dart';
 import 'yt_shelf_row.dart';
 
@@ -35,28 +36,40 @@ class _SearchTabState extends State<SearchTab> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-          child: TextField(
-            controller: _ctrl,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (v) => setState(() => _query = v.trim()),
-            decoration: InputDecoration(
-              hintText: 'Search songs, albums, artists…',
-              filled: true,
-              fillColor: PA.card,
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () {
-                        _ctrl.clear();
-                        setState(() => _query = '');
-                      }),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(PA.rLg),
-                  borderSide: BorderSide.none),
-            ),
+          padding: const EdgeInsets.fromLTRB(12, 12, 4, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctrl,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (v) => setState(() => _query = v.trim()),
+                  decoration: InputDecoration(
+                    hintText: 'Search songs, albums, artists…',
+                    filled: true,
+                    fillColor: PA.card,
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _ctrl.clear();
+                              setState(() => _query = '');
+                            }),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(PA.rLg),
+                        borderSide: BorderSide.none),
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.library_music_outlined),
+                tooltip: 'Your YouTube library',
+                onPressed: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const YtLibraryScreen())),
+              ),
+            ],
           ),
         ),
         Expanded(

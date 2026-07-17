@@ -306,6 +306,35 @@ class AppState extends ChangeNotifier {
     }
     if (tracks.isNotEmpty) await playerService.playQueue(tracks, 0);
   }
+
+  /// Resolve a YT playlist/album to its tracks (deduped, in order).
+  Future<List<Track>> ytItemTracks(YtMusicItem item) async {
+    final shelves = item.playlistId != null
+        ? await yt.tube.playlist(item.playlistId!)
+        : item.browseId != null
+            ? await yt.tube.browsePage(item.browseId!)
+            : const <YtShelf>[];
+    final tracks = <Track>[];
+    final seen = <String>{};
+    for (final s in shelves) {
+      for (final i in s.items) {
+        final rt = i.toTrack();
+        if (rt != null && seen.add(rt.id)) tracks.add(rt);
+      }
+    }
+    return tracks;
+  }
+
+  /// Import a YT playlist/album into a local playlist so it lives in the
+  /// library (and works offline once its tracks are downloaded). Returns the
+  /// created playlist, or null if it had no playable tracks.
+  Future<Playlist?> importYtPlaylist(YtMusicItem item) async {
+    final tracks = await ytItemTracks(item);
+    if (tracks.isEmpty) return null;
+    final pl = await playlists.create(item.title);
+    await playlists.addTracks(pl, tracks);
+    return pl;
+  }
 }
 
 /// A resolved home "Jump back in" card.

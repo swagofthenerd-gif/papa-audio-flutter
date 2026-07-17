@@ -79,6 +79,22 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 17)),
+        actions: [
+          if (tracks.isNotEmpty &&
+              widget.item.kind != YtItemKind.artist)
+            IconButton(
+              icon: const Icon(Icons.library_add_outlined),
+              tooltip: 'Save to your library',
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final pl = await s.importYtPlaylist(widget.item);
+                messenger.showSnackBar(SnackBar(
+                    content: Text(pl == null
+                        ? 'Nothing to import'
+                        : 'Saved "${pl.name}" to your playlists')));
+              },
+            ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: PA.accent))

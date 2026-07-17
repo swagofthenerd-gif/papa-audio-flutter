@@ -621,9 +621,6 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Text-scale-safe height: art + gap + two text lines at the current scale.
-    final scaler = MediaQuery.textScalerOf(context);
-    final textBlock = scaler.scale(13) + scaler.scale(11) + 6;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -651,8 +648,9 @@ class _Card extends StatelessWidget {
                         px: 300),
               ),
               const SizedBox(height: 6),
-              SizedBox(
-                height: textBlock,
+              // Flex the text area so real line heights (taller than fontSize)
+              // can never overflow the card. maxLines:1 each + ellipsis clip.
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -660,12 +658,12 @@ class _Card extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 13)),
+                            fontWeight: FontWeight.w600, fontSize: 13, height: 1.2)),
                     Text(subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style:
-                            const TextStyle(color: PA.textSecondary, fontSize: 11)),
+                        style: const TextStyle(
+                            color: PA.textSecondary, fontSize: 11, height: 1.2)),
                   ],
                 ),
               ),
@@ -683,7 +681,9 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scaler = MediaQuery.textScalerOf(context);
-    final height = 138 + 6 + scaler.scale(13) + scaler.scale(11) + 8;
+    // art + gap + two flexed text lines at 1.2 line-height, with headroom so the
+    // card's Expanded text area never has to clip.
+    final height = 138 + 6 + scaler.scale(13 * 1.25 + 11 * 1.25) + 6;
     return SizedBox(
       height: height,
       child: ListView.separated(

@@ -56,20 +56,26 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
           : InAppWebView(
               initialUrlRequest: URLRequest(url: _loginUrl),
               initialSettings: InAppWebViewSettings(
-                // A recent desktop Chrome UA is the most reliably accepted by
-                // Google's embedded-login checks.
+                // Google blocks most embedded-webview logins ("browser not
+                // secure"). A desktop Firefox UA is the most reliably accepted —
+                // its check is more lenient than for Chrome/WebView UAs.
                 userAgent:
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                    '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) '
+                    'Gecko/20100101 Firefox/121.0',
                 javaScriptEnabled: true,
                 thirdPartyCookiesEnabled: true,
+                // Present as a normal browser, not a headless/automated one.
+                incognito: false,
               ),
               onLoadStop: (controller, url) async {
                 if (url == null) return;
-                // Google's "this browser or app may not be secure" wall.
+                // Google's "this browser or app may not be secure" wall — it
+                // redirects to a *rejected* URL and/or sets that page title.
                 if (url.host.contains('accounts.google.com')) {
+                  final path = url.path.toLowerCase();
                   final title = (await controller.getTitle() ?? '').toLowerCase();
-                  if (title.contains("couldn't sign you in") ||
+                  if (path.contains('rejected') ||
+                      title.contains("couldn't sign you in") ||
                       title.contains('not secure')) {
                     if (mounted) setState(() => _blocked = true);
                     return;

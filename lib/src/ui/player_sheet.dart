@@ -60,15 +60,25 @@ class _PlayerSheetState extends State<PlayerSheet>
     final s = context.read<AppState>();
     if (videoOn.value) {
       videoOn.value = false;
+      s.playerService.videoActive = false;
       final at = await s.ytVideo.close();
       await s.playerService.resumeFromVideo(at);
     } else {
       videoOn.value = true;
       final at = await s.playerService.suspendForVideo();
+      // While video owns playback, route the transport play/pause to it.
+      s.playerService
+        ..videoActive = true
+        ..onVideoPlayPause = () {
+          final c = s.ytVideo.controller;
+          if (c == null) return;
+          c.value.isPlaying ? c.pause() : c.play();
+        };
       await s.ytVideo.open(videoId, fromSec: at);
       if (s.ytVideo.error != null && mounted) {
         // Couldn't resolve a video stream — fall back to audio.
         videoOn.value = false;
+        s.playerService.videoActive = false;
         await s.playerService.resumeFromVideo(at);
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Video unavailable for this track')));
@@ -86,11 +96,14 @@ class _PlayerSheetState extends State<PlayerSheet>
 
   void _updateArtColor(BuildContext context, Track track) {
     if (_artColorKey == track.key) return;
-    // Track changed — tear down any video overlay so it can't play the wrong
-    // clip over the new track's audio.
+    // Track changed (e.g. user skipped) — tear down any video overlay so it
+    // can't play the wrong clip, and resume audio for the new track.
     if (videoOn.value) {
       videoOn.value = false;
-      context.read<AppState>().ytVideo.close();
+      final s = context.read<AppState>();
+      s.playerService.videoActive = false;
+      s.ytVideo.close();
+      s.playerService.resumeFromVideo(0);
     }
     _artColorKey = track.key;
     final s = context.read<AppState>();

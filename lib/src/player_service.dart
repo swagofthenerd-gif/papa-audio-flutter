@@ -519,8 +519,19 @@ class PlayerService {
   static const _baseVolume = 1.0;
   int _rampSeq = 0; // newer ramps cancel older ones
 
+  /// True while the video overlay owns playback; audio must stay paused so the
+  /// two engines never play at once. Transport play/pause routes to the video.
+  bool videoActive = false;
+  void Function()? onVideoPlayPause;
+
   /// Play/pause with a short volume ramp (when enabled) instead of hard cuts.
   Future<void> togglePlay() async {
+    // Video mode: the transport controls the video, never the (paused) audio,
+    // so tapping play can't stack a second audio stream on top of the video.
+    if (videoActive) {
+      onVideoPlayPause?.call();
+      return;
+    }
     final s = settings;
     final fade = s?.playPauseFade ?? false;
     final ms = s?.fadeMs ?? 300;

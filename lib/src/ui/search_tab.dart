@@ -101,14 +101,24 @@ class _ExploreBrowseState extends State<_ExploreBrowse> {
     _load();
   }
 
+  String? _continuation;
+  bool _loadingMore = false;
+
   Future<void> _load() async {
     final tube = context.read<AppState>().yt.tube;
     try {
-      // Explore surface first (charts, new releases, moods); fall back to home.
-      var shelves = await tube.explore();
+      // Explore surface (charts, moods) + new releases; fall back to home.
+      final page = await tube.browsePaged('FEmusic_explore');
+      var shelves = page.shelves;
       if (shelves.isEmpty) shelves = await tube.home();
+      // Fold new releases in behind the explore shelves (best-effort).
+      try {
+        final nr = await tube.newReleases();
+        shelves = [...shelves, ...nr];
+      } catch (_) {}
       if (mounted) setState(() {
             _shelves = shelves;
+            _continuation = page.continuation;
             _loading = false;
           });
     } catch (e) {
@@ -116,6 +126,27 @@ class _ExploreBrowseState extends State<_ExploreBrowse> {
             _error = e.toString();
             _loading = false;
           });
+    }
+  }
+
+  Future<void> _loadMore() async {
+    final token = _continuation;
+    if (token == null || _loadingMore) return;
+    _loadingMore = true;
+    try {
+      final page = await context.read<AppState>().yt.tube.continued(token);
+      if (mounted && page.shelves.isNotEmpty) {
+        setState(() {
+          _shelves = [..._shelves, ...page.shelves];
+          _continuation = page.continuation;
+        });
+      } else {
+        _continuation = null; // exhausted
+      }
+    } catch (_) {
+      // leave continuation so a later scroll can retry
+    } finally {
+      _loadingMore = false;
     }
   }
 
@@ -128,27 +159,47 @@ class _ExploreBrowseState extends State<_ExploreBrowse> {
     return RefreshIndicator(
       color: PA.accent,
       onRefresh: _load,
-      child: ListView(
-        children: [
-          if (!s.ytAuth.signedIn) const _SignInBanner(),
-          if (_error != null && _shelves.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  const Icon(Icons.explore_off, color: PA.textMuted, size: 48),
-                  const SizedBox(height: 12),
-                  Text('Couldn\'t load YouTube Music.\n$_error',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: PA.textSecondary)),
-                  const SizedBox(height: 12),
-                  OutlinedButton(onPressed: _load, child: const Text('Retry')),
-                ],
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (n) {
+          // Near the end and more to fetch — page in the next batch.
+          if (n.metrics.pixels > n.metrics.maxScrollExtent - 600 &&
+              _continuation != null) {
+            _loadMore();
+          }
+          return false;
+        },
+        child: ListView(
+          children: [
+            if (!s.ytAuth.signedIn) const _SignInBanner(),
+            if (_error != null && _shelves.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    const Icon(Icons.explore_off, color: PA.textMuted, size: 48),
+                    const SizedBox(height: 12),
+                    Text('Couldn\'t load YouTube Music.\n$_error',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: PA.textSecondary)),
+                    const SizedBox(height: 12),
+                    OutlinedButton(onPressed: _load, child: const Text('Retry')),
+                  ],
+                ),
               ),
-            ),
-          for (final shelf in _shelves) YtShelfRow(shelf: shelf),
-          const SizedBox(height: 24),
-        ],
+            for (final shelf in _shelves) YtShelfRow(shelf: shelf),
+            if (_continuation != null)
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Center(
+                    child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: PA.accent))),
+              ),
+            const SizedBox(height: 24),
+          ],
+        ),
       ),
     );
   }

@@ -122,6 +122,11 @@ class Innertube {
   Future<List<YtShelf>> moodsAndGenres() async =>
       parseShelves(await browseRaw('FEmusic_moods_and_genres'));
 
+  /// New releases (albums/singles) — includes the signed-in user's
+  /// subscription-driven releases at the top when logged in.
+  Future<List<YtShelf>> newReleases() async =>
+      parseShelves(await browseRaw('FEmusic_new_releases'));
+
   /// Listening history, sectioned by day, newest first.
   Future<List<YtShelf>> history() async =>
       parseShelves(await browseRaw('FEmusic_history'));

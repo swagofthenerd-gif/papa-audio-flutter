@@ -51,8 +51,9 @@ class PapaApp extends StatelessWidget {
   }
 }
 
-/// Bouncy overscroll on all platforms + a subtle stretch, no default Android
-/// glow clutter. Applied globally via MaterialApp.scrollBehavior.
+/// Bouncy overscroll on all platforms. Applied globally via
+/// MaterialApp.scrollBehavior. BouncingScrollPhysics provides the "give"
+/// itself, so no separate overscroll indicator is needed.
 class _PapaScrollBehavior extends MaterialScrollBehavior {
   const _PapaScrollBehavior();
   @override
@@ -61,7 +62,7 @@ class _PapaScrollBehavior extends MaterialScrollBehavior {
   @override
   Widget buildOverscrollIndicator(
           BuildContext context, Widget child, ScrollableDetails details) =>
-      StretchingOverscrollIndicator(details: details, child: child);
+      child; // bounce handles overscroll; no glow/stretch overlay
 }
 
 class Root extends StatelessWidget {

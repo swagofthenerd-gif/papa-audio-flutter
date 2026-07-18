@@ -25,7 +25,10 @@ void showTrackMenu(BuildContext context, Track t) {
       final canDownload =
           t.sourceUri == null && t.filePath.isNotEmpty && s.configured;
       return SafeArea(
-        child: Column(
+        // Scrollable: with every YT action visible the sheet outgrows small
+        // screens (overflowed by ~73 px at 1080x1920).
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
@@ -126,6 +129,7 @@ void showTrackMenu(BuildContext context, Track t) {
               },
             ),
           ],
+          ),
         ),
       );
     },

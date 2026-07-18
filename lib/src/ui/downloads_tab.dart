@@ -118,8 +118,11 @@ class _DownloadsTabState extends State<DownloadsTab> {
                             height: 22,
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: PA.accent)))),
-                title: Text(item.key.split(RegExp(r'[\\/]')).last,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: Text(
+                    dm.inFlight[item.key]?.title ??
+                        item.key.split(RegExp(r'[\\/]')).last,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 subtitle: LinearProgressIndicator(
                     value: item.value > 0 ? item.value : null,
                     color: PA.accent,

@@ -17,6 +17,7 @@ class DownloadManager extends ChangeNotifier {
   Directory? _dir;
   int _lastProgressNotify = 0;
   final Map<String, double> progress = {}; // track id → 0..1 (in flight)
+  final Map<String, Track> inFlight = {}; // track id → track (for UI titles)
   final Map<String, String> failed = {}; // track id → error message
   List<Track> downloaded = []; // playable file:// tracks
 
@@ -55,6 +56,7 @@ class DownloadManager extends ChangeNotifier {
     if (isDownloaded(t.id) || progress.containsKey(t.id)) return;
     final dir = await _downloadsDir();
     progress[t.id] = 0;
+    inFlight[t.id] = t;
     failed.remove(t.id);
     notifyListeners();
 
@@ -132,6 +134,7 @@ class DownloadManager extends ChangeNotifier {
     } finally {
       client.close(); // release keep-alive sockets on every download
       progress.remove(t.id);
+      inFlight.remove(t.id);
       notifyListeners();
     }
   }
@@ -152,6 +155,7 @@ class DownloadManager extends ChangeNotifier {
     final videoId = t.id.startsWith('yt:') ? t.id.substring(3) : t.id;
     final dir = await _downloadsDir();
     progress[t.id] = 0;
+    inFlight[t.id] = t;
     failed.remove(t.id);
     notifyListeners();
 
@@ -169,7 +173,11 @@ class DownloadManager extends ChangeNotifier {
       var received = 0;
       final sink = audioFile.openWrite();
       try {
+        var chunks = 0;
         while (total == 0 || received < total) {
+          // Guard against a server that keeps answering without advancing us
+          // (e.g. ignoring the range header) — never loop forever.
+          if (++chunks > 512) throw 'download did not advance';
           var to = received + YtLazyAudioSource.chunkBytes; // exclusive
           if (total > 0 && to > total) to = total;
           final req = http.Request('GET', Uri.parse(stream.url));
@@ -177,6 +185,8 @@ class DownloadManager extends ChangeNotifier {
           req.headers['range'] = 'bytes=$received-${to - 1}';
           final resp =
               await client.send(req).timeout(const Duration(minutes: 2));
+          debugPrint(
+              '[yt-dl] $videoId chunk $chunks @$received/$total → ${resp.statusCode}');
           if (resp.statusCode >= 400) throw 'HTTP ${resp.statusCode}';
           if (total == 0) {
             // "bytes 0-1048575/3143133" — learn the size from content-range.
@@ -246,6 +256,7 @@ class DownloadManager extends ChangeNotifier {
     } finally {
       client.close();
       progress.remove(t.id);
+      inFlight.remove(t.id);
       notifyListeners();
     }
   }

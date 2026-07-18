@@ -64,12 +64,16 @@ class YtStream {
   final int? contentLength; // bytes, when YT reports it
   final int bitrate;
   final DateTime expiresAt; // stream URLs die after ~6h; refresh past this
+  // googlevideo stalls/times out connections whose user-agent doesn't match
+  // the client that minted the URL — every fetch of [url] must send this UA.
+  final String userAgent;
   const YtStream({
     required this.url,
     required this.mime,
     this.contentLength,
     required this.bitrate,
     required this.expiresAt,
+    required this.userAgent,
   });
 
   bool get fresh => DateTime.now().isBefore(expiresAt);

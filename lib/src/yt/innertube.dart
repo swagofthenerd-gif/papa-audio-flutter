@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, debugPrint;
 import 'package:http/http.dart' as http;
 
 import 'yt_auth.dart';
@@ -182,9 +182,12 @@ class Innertube {
 
   // ── Player (stream resolution) ─────────────────────────────────────────────
 
-  // The two /player client identities whose responses carry plain (uncphered)
-  // URLs. ANDROID_MUSIC is tried first; some tracks only expose a usable format
-  // to one client, so IOS is the fallback.
+  // /player client identities whose responses carry plain (unciphered) URLs.
+  // Verified against live YT (2026-07): ANDROID_MUSIC returns LOGIN_REQUIRED
+  // when anonymous (works signed-in with premium-quality formats); ANDROID_VR
+  // and a *current* IOS identity both resolve anonymously. IOS versions that
+  // fall too far behind get a 400 FAILED_PRECONDITION, so bump these when
+  // resolution starts failing across the board.
   static const _androidMusicClient = {
     'clientName': 'ANDROID_MUSIC',
     'clientVersion': '7.11.51',
@@ -194,18 +197,51 @@ class Innertube {
   };
   static const _iosClient = {
     'clientName': 'IOS',
-    'clientVersion': '19.29.1',
+    'clientVersion': '20.10.4',
+    'deviceMake': 'Apple',
     'deviceModel': 'iPhone16,2',
+    'osName': 'iPhone',
+    'osVersion': '18.3.2.22D82',
+    'hl': 'en',
+    'gl': 'US',
+  };
+  static const _androidVrClient = {
+    'clientName': 'ANDROID_VR',
+    'clientVersion': '1.62.27',
+    'deviceMake': 'Oculus',
+    'deviceModel': 'Quest 3',
+    'osName': 'Android',
+    'osVersion': '12L',
+    'androidSdkVersion': 32,
     'hl': 'en',
     'gl': 'US',
   };
 
+  /// UAs that must accompany both the /player call and any fetch of the URLs
+  /// it returns (googlevideo stalls mismatched user-agents).
+  static const iosUserAgent =
+      'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)';
+  static const androidMusicUserAgent =
+      'com.google.android.apps.youtube.music/7.11.51 (Linux; U; Android 14) gzip';
+  static const androidVrUserAgent =
+      'com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip';
+
+  // ANDROID_MUSIC talks to the music host (its cookies/session live there);
+  // IOS and ANDROID_VR are plain-YouTube apps and 400 on the music host.
+  static const _wwwBase = 'https://www.youtube.com/youtubei/v1';
+
   Future<Map<String, dynamic>> _playerJson(
-      String videoId, Map<String, dynamic> client, String userAgent) async {
-    final headers = auth.headers()..['user-agent'] = userAgent;
+      String videoId, Map<String, dynamic> client, String userAgent,
+      {String base = _wwwBase, bool authed = false}) async {
+    // Native app clients 400 on the web-style origin/x-goog headers that
+    // auth.headers() sends — they want a bare app request. Only the signed-in
+    // ANDROID_MUSIC call carries the web session headers (cookies + hash).
+    final headers = authed
+        ? (auth.headers()..['user-agent'] = userAgent)
+        : {'content-type': 'application/json', 'user-agent': userAgent};
     final resp = await _client
         .post(
-          Uri.parse('$_base/player?prettyPrint=false'),
+          Uri.parse('$base/player?prettyPrint=false'),
           headers: headers,
           body: jsonEncode({
             'context': {'client': client},
@@ -229,23 +265,44 @@ class Innertube {
     return json;
   }
 
-  /// Resolve a direct audio stream — ANDROID_MUSIC, then IOS fallback.
+  /// Resolve a direct audio stream. Signed in, ANDROID_MUSIC leads (best
+  /// quality); anonymous, it always answers LOGIN_REQUIRED so lead with the
+  /// clients that resolve without an account.
   Future<YtStream> playerStream(String videoId) async {
+    final clients = auth.signedIn
+        ? [
+            (_androidMusicClient, androidMusicUserAgent, _base),
+            (_androidVrClient, androidVrUserAgent, _wwwBase),
+            (_iosClient, iosUserAgent, _wwwBase),
+          ]
+        : [
+            // ANDROID_VR leads: it's the only anonymous client whose URLs
+            // serve the whole file. IOS resolves more videos but its
+            // anonymous URLs are PO-token-capped to the first ~1 MB (~60 s of
+            // opus) — a preview, not a stream — so it's strictly a fallback.
+            (_androidVrClient, androidVrUserAgent, _wwwBase),
+            (_iosClient, iosUserAgent, _wwwBase),
+          ];
     YtException? last;
-    for (final client in [
-      (_androidMusicClient,
-          'com.google.android.apps.youtube.music/7.11.51 (Linux; U; Android 14) gzip'),
-      (_iosClient,
-          'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5 like Mac OS X)'),
-    ]) {
+    for (final client in clients) {
       try {
-        final json = await _playerJson(videoId, client.$1, client.$2);
-        final s = _bestAudio(json);
+        final json = await _playerJson(videoId, client.$1, client.$2,
+            base: client.$3,
+            authed: auth.signedIn && client.$1 == _androidMusicClient);
+        final s = _bestAudio(json, client.$2);
         if (s != null) return s;
         last = YtException('No direct audio stream', videoId: videoId);
       } on YtException catch (e) {
+        debugPrint(
+            '[yt] player ${client.$1['clientName']} failed: ${e.message} ${e.playabilityStatus ?? ''}');
         last = e;
-        if (e.playabilityStatus != null) break; // a real block — fallback won't help
+        // LOGIN_REQUIRED is client-specific (ANDROID_MUSIC anonymously) — the
+        // next client may still resolve. Other playability blocks (region,
+        // gone, age) apply to the video itself, so stop.
+        if (e.playabilityStatus != null &&
+            e.playabilityStatus != 'LOGIN_REQUIRED') {
+          break;
+        }
       }
     }
     throw last ?? YtException('No stream', videoId: videoId);
@@ -255,8 +312,9 @@ class Innertube {
   /// formats live in `formats` (e.g. itag 18, 360p) and carry their own audio.
   Future<String?> playerVideo(String videoId) async {
     try {
-      final json = await _playerJson(videoId, _iosClient,
-          'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5 like Mac OS X)');
+      // ANDROID_VR is the client that still returns muxed itag-18 formats.
+      final json =
+          await _playerJson(videoId, _androidVrClient, androidVrUserAgent);
       final sd = json['streamingData'] as Map<String, dynamic>?;
       Map<String, dynamic>? best;
       for (final f in (sd?['formats'] as List? ?? [])) {
@@ -274,7 +332,7 @@ class Innertube {
     }
   }
 
-  static YtStream? _bestAudio(Map<String, dynamic> json) {
+  static YtStream? _bestAudio(Map<String, dynamic> json, String userAgent) {
     final sd = json['streamingData'] as Map<String, dynamic>?;
     final formats = [
       ...?(sd?['adaptiveFormats'] as List?),
@@ -301,6 +359,7 @@ class Innertube {
       bitrate: ((best['bitrate'] as num?) ?? 0).toInt(),
       expiresAt:
           DateTime.now().add(Duration(seconds: (expiresIn - 120).clamp(60, 86400))),
+      userAgent: userAgent,
     );
   }
 
@@ -328,6 +387,24 @@ class Innertube {
               '';
           final items = _items(node['items']);
           if (items.isNotEmpty) shelves.add(YtShelf(title: title, items: items));
+        // 2026 search layout: the "Top result" card plus per-type sections of
+        // bare musicResponsiveListItemRenderers, no musicShelfRenderer at all.
+        case 'musicCardShelfRenderer':
+          final items = _items(node['contents']);
+          if (items.isNotEmpty) {
+            shelves.add(YtShelf(title: _text(node['header']) ?? '', items: items));
+          }
+        case 'itemSectionRenderer':
+          // Only collect direct list items; on other surfaces this renderer
+          // merely wraps shelves that are parsed by their own cases above.
+          final direct = [
+            for (final c in (node['contents'] as List? ?? []))
+              if (c is Map<String, dynamic> &&
+                  c.containsKey('musicResponsiveListItemRenderer'))
+                c
+          ];
+          final items = _items(direct);
+          if (items.isNotEmpty) shelves.add(YtShelf(title: '', items: items));
       }
     });
     return shelves;

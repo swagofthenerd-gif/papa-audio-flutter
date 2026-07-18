@@ -40,7 +40,10 @@ class YtVideoController extends ChangeNotifier {
       if (url == null) throw Exception('no video stream');
       // Bail if a newer open() superseded this one while resolving.
       if (_videoId != videoId) return;
-      final c = VideoPlayerController.networkUrl(Uri.parse(url));
+      // Same UA as the /player call that minted the URL — googlevideo stalls
+      // mismatched user-agents.
+      final c = VideoPlayerController.networkUrl(Uri.parse(url),
+          httpHeaders: const {'user-agent': Innertube.androidVrUserAgent});
       await c.initialize();
       if (_videoId != videoId) {
         await c.dispose();

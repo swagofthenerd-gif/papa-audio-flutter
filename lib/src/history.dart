@@ -115,20 +115,22 @@ class HistoryService extends ChangeNotifier {
     firstListen.putIfAbsent(t.key, () => now);
     lastListen[t.key] = now;
     _byKey[t.key] = t;
-    int? dbId;
-    try {
-      dbId = await _db?.db.insert('history', {
-        'at': now,
-        'track_key': t.key,
-        'track_json': jsonEncode(t.toJson()),
-      });
-    } catch (_) {}
-    entries.insert(0, HistoryEntry(dbId: dbId, track: t, at: now));
+    // Surface in memory first so the UI (and callers) see the listen
+    // immediately; the DB id is backfilled when the insert lands.
+    final entry = HistoryEntry(track: t, at: now);
+    entries.insert(0, entry);
     if (entries.length > _memoryCap) {
       entries.removeRange(_memoryCap, entries.length);
     }
     revision++;
     notifyListeners();
+    try {
+      entry.dbId = await _db?.db.insert('history', {
+        'at': now,
+        'track_key': t.key,
+        'track_json': jsonEncode(t.toJson()),
+      });
+    } catch (_) {}
   }
 
   Future<void> removeEntry(HistoryEntry e) async {
@@ -286,9 +288,11 @@ class HistoryService extends ChangeNotifier {
 }
 
 class HistoryEntry {
-  final int? dbId;
+  // Mutable: the entry surfaces in memory immediately; the DB row id is
+  // backfilled once the async insert completes.
+  int? dbId;
   final Track track;
   final int at; // epoch ms
 
-  const HistoryEntry({this.dbId, required this.track, required this.at});
+  HistoryEntry({this.dbId, required this.track, required this.at});
 }

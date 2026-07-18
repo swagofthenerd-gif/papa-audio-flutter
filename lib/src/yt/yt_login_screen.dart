@@ -25,6 +25,74 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
   static final _loginUrl = WebUri(
       'https://accounts.google.com/ServiceLogin?service=youtube&hl=en&continue=https://music.youtube.com/');
 
+  /// Manual fallback for when Google refuses embedded sign-in entirely: the
+  /// user copies the Cookie header from a signed-in music.youtube.com tab in a
+  /// real browser and pastes it here.
+  Future<void> _pasteCookies() async {
+    final controller = TextEditingController();
+    final pasted = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Paste browser cookies'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'On your computer, sign in at music.youtube.com, open DevTools '
+              '(F12) → Network tab, click any request to music.youtube.com, '
+              'and copy the whole "Cookie:" request header. Paste it below.',
+              style: TextStyle(fontSize: 13, color: PA.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 4,
+              autofocus: true,
+              style: const TextStyle(fontSize: 12),
+              decoration: const InputDecoration(
+                hintText: 'SID=…; HSID=…; SAPISID=…; …',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: PA.accent, foregroundColor: Colors.black),
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('Sign in'),
+          ),
+        ],
+      ),
+    );
+    if (pasted == null || pasted.trim().isEmpty || !mounted) return;
+    final map = <String, String>{};
+    for (final part in pasted.split(';')) {
+      final eq = part.indexOf('=');
+      if (eq <= 0) continue;
+      map[part.substring(0, eq).trim()] = part.substring(eq + 1).trim();
+    }
+    if (!map.containsKey('SAPISID') && !map.containsKey('__Secure-3PAPISID')) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'No SAPISID cookie found — copy the full Cookie header from a '
+                'signed-in music.youtube.com tab.')));
+      }
+      return;
+    }
+    final s = context.read<AppState>();
+    await s.ytAuth.setCookies(map);
+    await s.yt.onAuthChanged();
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
   Future<void> _tryCapture() async {
     if (_finishing) return;
     final cookies =
@@ -50,6 +118,12 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
         backgroundColor: PA.background,
         title: const Text('Sign in to YouTube Music',
             style: TextStyle(fontSize: 17)),
+        actions: [
+          TextButton(
+            onPressed: _pasteCookies,
+            child: const Text('Paste cookies'),
+          ),
+        ],
       ),
       body: _blocked
           ? _blockedHelp()
@@ -104,7 +178,8 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
                 'Google sometimes refuses to sign in from an embedded browser. '
                 'You can still browse and search YouTube Music without signing '
                 'in — only your personalized recommendations need an account. '
-                'Try again in a moment, or continue signed out.',
+                'To sign in anyway, paste the cookies from a signed-in '
+                'browser tab on your computer.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: PA.textSecondary)),
             const SizedBox(height: 20),
@@ -119,10 +194,15 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
                 FilledButton(
                   style: FilledButton.styleFrom(
                       backgroundColor: PA.accent, foregroundColor: Colors.black),
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('Continue signed out'),
+                  onPressed: _pasteCookies,
+                  child: const Text('Paste cookies'),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Continue signed out'),
             ),
           ],
         ),

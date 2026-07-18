@@ -163,25 +163,46 @@ class DownloadManager extends ChangeNotifier {
       final stream = await resolver.resolve(videoId);
       final ext = stream.mime.contains('webm') ? '.webm' : '.m4a';
       audioFile = File('${dir.path}${Platform.pathSeparator}$unique$ext');
-      final req = http.Request('GET', Uri.parse(stream.url));
-      final resp = await client.send(req).timeout(const Duration(minutes: 5));
-      if (resp.statusCode != 200) throw 'HTTP ${resp.statusCode}';
-      final total = stream.contentLength ?? resp.contentLength ?? 0;
+      // googlevideo rejects unranged / over-large requests on some client URLs
+      // (403), so pull the file as sequential bounded chunks like playback does.
+      var total = stream.contentLength ?? 0;
       var received = 0;
       final sink = audioFile.openWrite();
       try {
-        await for (final chunk
-            in resp.stream.timeout(const Duration(seconds: 60))) {
-          sink.add(chunk);
-          received += chunk.length;
-          if (total > 0) {
-            progress[t.id] = received / total;
-            final now = DateTime.now().millisecondsSinceEpoch;
-            if (now - _lastProgressNotify >= 250) {
-              _lastProgressNotify = now;
-              notifyListeners();
+        while (total == 0 || received < total) {
+          var to = received + YtLazyAudioSource.chunkBytes; // exclusive
+          if (total > 0 && to > total) to = total;
+          final req = http.Request('GET', Uri.parse(stream.url));
+          req.headers['user-agent'] = stream.userAgent;
+          req.headers['range'] = 'bytes=$received-${to - 1}';
+          final resp =
+              await client.send(req).timeout(const Duration(minutes: 2));
+          if (resp.statusCode >= 400) throw 'HTTP ${resp.statusCode}';
+          if (total == 0) {
+            // "bytes 0-1048575/3143133" — learn the size from content-range.
+            final cr = resp.headers['content-range'];
+            final slash = cr?.lastIndexOf('/') ?? -1;
+            if (cr != null && slash >= 0) {
+              total = int.tryParse(cr.substring(slash + 1)) ?? 0;
             }
           }
+          var got = 0;
+          await for (final chunk
+              in resp.stream.timeout(const Duration(seconds: 60))) {
+            sink.add(chunk);
+            got += chunk.length;
+            received += chunk.length;
+            if (total > 0) {
+              progress[t.id] = received / total;
+              final now = DateTime.now().millisecondsSinceEpoch;
+              if (now - _lastProgressNotify >= 250) {
+                _lastProgressNotify = now;
+                notifyListeners();
+              }
+            }
+          }
+          if (total == 0 && got < YtLazyAudioSource.chunkBytes) break; // EOF
+          if (got == 0) break; // server stopped serving — avoid spinning
         }
       } finally {
         await sink.close();

@@ -195,24 +195,73 @@ class YtLazyAudioSource extends StreamAudioSource {
 
   YtLazyAudioSource(this.videoId, this.resolver, {super.tag});
 
+  // googlevideo rejects unranged and over-large range requests on some client
+  // URLs (403 above ~1–2 MB observed on IOS-minted URLs), so everything is
+  // fetched as sequential bounded chunks and stitched into one stream.
+  static const chunkBytes = 1024 * 1024;
+
   @override
   Future<StreamAudioResponse> request([int? start, int? end]) async {
     final s = await resolver.resolve(videoId);
+    final from = start ?? 0;
+    // First chunk fetched eagerly: it validates the URL (errors surface here,
+    // not mid-stream) and its content-range reveals the total length. Ranges
+    // must never run past EOF — googlevideo rejects out-of-bounds requests —
+    // so cap by every length we know.
+    final first = await _fetchChunk(s, from, end ?? s.contentLength);
+    final total = s.contentLength ?? first.total;
+    final endExcl = end ?? total;
+    return StreamAudioResponse(
+      sourceLength: total,
+      contentLength: endExcl != null ? endExcl - from : null,
+      offset: from,
+      stream: _chunks(s, first, from, endExcl),
+      contentType: s.contentType,
+    );
+  }
+
+  Future<_Chunk> _fetchChunk(YtStream s, int from, int? endExcl) async {
+    var to = from + chunkBytes; // exclusive
+    if (endExcl != null && endExcl < to) to = endExcl;
     final req = http.Request('GET', Uri.parse(s.url));
-    if (start != null || end != null) {
-      req.headers['range'] = 'bytes=${start ?? 0}-${end != null ? end - 1 : ''}';
-    }
+    req.headers['user-agent'] = s.userAgent;
+    req.headers['range'] = 'bytes=$from-${to - 1}';
     final resp = await _client.send(req).timeout(const Duration(seconds: 30));
     if (resp.statusCode >= 400) {
       throw YtException('YT stream HTTP ${resp.statusCode}');
     }
-    final total = s.contentLength ?? resp.contentLength;
-    return StreamAudioResponse(
-      sourceLength: total,
-      contentLength: resp.contentLength,
-      offset: start ?? 0,
-      stream: resp.stream,
-      contentType: s.contentType,
-    );
+    // "bytes 0-1048575/3143133" → total size after the slash.
+    int? total;
+    final cr = resp.headers['content-range'];
+    final slash = cr?.lastIndexOf('/') ?? -1;
+    if (cr != null && slash >= 0) {
+      total = int.tryParse(cr.substring(slash + 1));
+    }
+    return _Chunk(resp.stream, to, total);
   }
+
+  Stream<List<int>> _chunks(
+      YtStream s, _Chunk first, int from, int? endExcl) async* {
+    var chunk = first;
+    var pos = from;
+    while (true) {
+      yield* chunk.body;
+      pos = chunk.nextFrom;
+      final limit = endExcl ?? chunk.total ?? s.contentLength;
+      if (limit != null && pos >= limit) return;
+      try {
+        chunk = await _fetchChunk(s, pos, limit);
+      } catch (e) {
+        debugPrint('[yt] chunk $videoId @$pos/$limit failed: $e');
+        rethrow;
+      }
+    }
+  }
+}
+
+class _Chunk {
+  final http.ByteStream body;
+  final int nextFrom; // exclusive end of this chunk = start of the next
+  final int? total; // full resource size from content-range, when reported
+  _Chunk(this.body, this.nextFrom, this.total);
 }

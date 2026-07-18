@@ -43,9 +43,25 @@ class PapaApp extends StatelessWidget {
       title: 'Papa Audio',
       debugShowCheckedModeBanner: false,
       theme: papaTheme(),
+      // App-wide bouncy scroll (with a glow fallback for reduced-motion), so
+      // every list has the same tactile "give" Namida is known for.
+      scrollBehavior: const _PapaScrollBehavior(),
       home: const Root(),
     );
   }
+}
+
+/// Bouncy overscroll on all platforms + a subtle stretch, no default Android
+/// glow clutter. Applied globally via MaterialApp.scrollBehavior.
+class _PapaScrollBehavior extends MaterialScrollBehavior {
+  const _PapaScrollBehavior();
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+  @override
+  Widget buildOverscrollIndicator(
+          BuildContext context, Widget child, ScrollableDetails details) =>
+      StretchingOverscrollIndicator(details: details, child: child);
 }
 
 class Root extends StatelessWidget {

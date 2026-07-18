@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
@@ -399,7 +400,8 @@ class _MiniBarState extends State<_MiniBar> {
                   builder: (_, snap) {
                     final playing = snap.data?.playing ?? false;
                     return IconButton(
-                      icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                      icon: _AnimatedPlayPause(
+                          playing: playing, size: 24, color: PA.text),
                       onPressed: ps.togglePlay,
                     );
                   },
@@ -411,6 +413,47 @@ class _MiniBarState extends State<_MiniBar> {
       ),
     );
   }
+}
+
+/// Play/pause glyph that morphs between the two icons instead of hard-swapping.
+class _AnimatedPlayPause extends StatefulWidget {
+  final bool playing;
+  final double size;
+  final Color color;
+  const _AnimatedPlayPause(
+      {required this.playing, required this.size, required this.color});
+  @override
+  State<_AnimatedPlayPause> createState() => _AnimatedPlayPauseState();
+}
+
+class _AnimatedPlayPauseState extends State<_AnimatedPlayPause>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+      value: widget.playing ? 1 : 0);
+
+  @override
+  void didUpdateWidget(_AnimatedPlayPause old) {
+    super.didUpdateWidget(old);
+    if (widget.playing != old.playing) {
+      widget.playing ? _c.forward() : _c.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedIcon(
+        icon: AnimatedIcons.play_pause,
+        progress: _c,
+        size: widget.size,
+        color: widget.color,
+      );
 }
 
 /// The YouTube video overlay: fills the artwork rect while active. Its own
@@ -725,21 +768,51 @@ class _LyricsPanel extends StatelessWidget {
   }
 }
 
-class _FavButton extends StatelessWidget {
+class _FavButton extends StatefulWidget {
   final Track track;
   final double size;
   const _FavButton({required this.track, required this.size});
+  @override
+  State<_FavButton> createState() => _FavButtonState();
+}
+
+class _FavButtonState extends State<_FavButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+  // Overshoot-and-settle so favoriting gives a satisfying little pop.
+  late final Animation<double> _scale = TweenSequence<double>([
+    TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.35), weight: 40),
+    TweenSequenceItem(tween: Tween(begin: 1.35, end: 1.0), weight: 60),
+  ]).animate(CurvedAnimation(parent: _c, curve: Curves.easeOut));
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  void _toggle(dynamic pl) {
+    final becomingFav = !pl.isFavorite(widget.track);
+    HapticFeedback.lightImpact();
+    pl.toggleFavorite(widget.track);
+    if (becomingFav) _c.forward(from: 0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pl = context.read<AppState>().playlists;
     return AnimatedBuilder(
       animation: pl,
       builder: (_, _) {
-        final fav = pl.isFavorite(track);
+        final fav = pl.isFavorite(widget.track);
         return IconButton(
-          icon: Icon(fav ? Icons.favorite : Icons.favorite_border,
-              size: size, color: fav ? PA.accent : PA.textSecondary),
-          onPressed: () => pl.toggleFavorite(track),
+          icon: ScaleTransition(
+            scale: _scale,
+            child: Icon(fav ? Icons.favorite : Icons.favorite_border,
+                size: widget.size, color: fav ? PA.accent : PA.textSecondary),
+          ),
+          onPressed: () => _toggle(pl),
         );
       },
     );
@@ -1024,8 +1097,8 @@ class _TransportControlsState extends State<TransportControls> {
                         padding: EdgeInsets.all(20),
                         child: CircularProgressIndicator(
                             strokeWidth: 3, color: Colors.black))
-                    : Icon(playing ? Icons.pause : Icons.play_arrow,
-                        color: Colors.black, size: 40),
+                    : _AnimatedPlayPause(
+                        playing: playing, size: 40, color: Colors.black),
               ),
             );
           },

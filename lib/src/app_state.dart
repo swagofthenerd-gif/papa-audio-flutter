@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'art_color.dart';
+import 'audio_format.dart';
 import 'bridge.dart';
 import 'db.dart';
 import 'downloads.dart';
@@ -41,6 +42,8 @@ class AppState extends ChangeNotifier {
   final TrackSelection selection = TrackSelection();
   late final ArtColorService artColors =
       ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));
+  late final AudioFormatService audioFormats =
+      AudioFormatService(resolveYt: (id) => yt.resolver.resolve(id));
   LyricsService? lyrics; // created once the DB is open
   WaveformService? waveforms;
 

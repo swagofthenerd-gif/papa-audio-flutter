@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../main.dart' show Shell;
 import '../app_state.dart';
+import '../audio_format.dart';
 import '../lyrics.dart';
 import '../models.dart';
 import '../player_service.dart';
@@ -261,7 +262,7 @@ class _PlayerSheetState extends State<PlayerSheet>
         // NEVER overflows on short screens — the art shrinks instead.
         final fullSide = math.min(
           (size.width - 48).clamp(0.0, 380.0),
-          (size.height - topInset - 468).clamp(140.0, 380.0),
+          (size.height - topInset - 494).clamp(140.0, 380.0),
         );
 
         // Heavy subtrees are built ONCE here (per track/stream event). The
@@ -689,6 +690,73 @@ class _AnimatedPlayPauseState extends State<_AnimatedPlayPause>
         size: widget.size,
         color: widget.color,
       );
+}
+
+/// Now-playing audio quality: a badge (LOSSLESS / HI-RES / 320) plus a detail
+/// line (FLAC · 1055 kbps · 44.1 kHz). Loads per track; hidden until known.
+class _QualityReadout extends StatefulWidget {
+  final Track track;
+  const _QualityReadout({required this.track});
+  @override
+  State<_QualityReadout> createState() => _QualityReadoutState();
+}
+
+class _QualityReadoutState extends State<_QualityReadout> {
+  AudioFormat? _fmt;
+  String? _key;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _QualityReadout old) {
+    super.didUpdateWidget(old);
+    if (old.track.key != widget.track.key) _load();
+  }
+
+  void _load() {
+    if (_key == widget.track.key) return;
+    _key = widget.track.key;
+    _fmt = null;
+    final track = widget.track;
+    context.read<AppState>().audioFormats.forTrack(track).then((f) {
+      if (mounted && _key == track.key) setState(() => _fmt = f);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final f = _fmt;
+    if (f == null) return const SizedBox(height: 20);
+    final hi = f.isHiRes || f.isLossless;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: hi ? PA.accent : PA.card,
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: Text(f.badge,
+              style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                  color: hi ? Colors.black : PA.textSecondary)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(f.detailLine,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: PA.textMuted, fontSize: 11)),
+        ),
+      ],
+    );
+  }
 }
 
 /// "Up next" strip: shows the track that will play next (shuffle/loop-aware),
@@ -1244,6 +1312,8 @@ class _FullPlayer extends StatelessWidget {
               _FavButton(track: track, size: 26),
             ],
           ),
+          const SizedBox(height: 6),
+          _QualityReadout(track: track),
           const Spacer(),
           SeekBar(ps: ps, track: track),
           TransportControls(ps: ps),

@@ -1,11 +1,29 @@
 import 'package:flutter/material.dart';
 
 /// Papa Audio palette — a Spotify-style dark system.
+///
+/// The three base surfaces are mutable so an AMOLED (pure-black) mode can swap
+/// them at runtime. They have zero `const`-context uses, so this doesn't break
+/// const widgets. Everything else stays `const`.
 class PA {
-  static const background = Color(0xFF121212);
-  static const surface = Color(0xFF181818);
-  static const surfaceElevated = Color(0xFF242424);
+  static Color background = _darkBg;
+  static Color surface = _darkSurface;
+  static Color surfaceElevated = _darkElevated;
   static const card = Color(0xFF282828);
+
+  // Standard Spotify-dark greys.
+  static const _darkBg = Color(0xFF121212);
+  static const _darkSurface = Color(0xFF181818);
+  static const _darkElevated = Color(0xFF242424);
+
+  /// Pure-black surfaces for OLED screens (true black pixels are off = power
+  /// saving, and the app looks deeper). Elevated stays a hair above black so
+  /// sheets/menus still read as layered.
+  static void applyAmoled(bool on) {
+    background = on ? const Color(0xFF000000) : _darkBg;
+    surface = on ? const Color(0xFF0A0A0A) : _darkSurface;
+    surfaceElevated = on ? const Color(0xFF161616) : _darkElevated;
+  }
   static const accent = Color(0xFF1DB954);
   static const white = Color(0xFFFFFFFF);
   static const text = Color(0xFFFFFFFF);
@@ -57,9 +75,9 @@ ThemeData papaTheme() {
         const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
       ),
     ),
-    snackBarTheme: const SnackBarThemeData(
+    snackBarTheme: SnackBarThemeData(
       backgroundColor: PA.surfaceElevated,
-      contentTextStyle: TextStyle(color: PA.text),
+      contentTextStyle: const TextStyle(color: PA.text),
       behavior: SnackBarBehavior.floating,
     ),
   );

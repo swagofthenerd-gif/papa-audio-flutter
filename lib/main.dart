@@ -40,14 +40,20 @@ class PapaApp extends StatelessWidget {
   const PapaApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Papa Audio',
-      debugShowCheckedModeBanner: false,
-      theme: papaTheme(),
-      // App-wide bouncy scroll (with a glow fallback for reduced-motion), so
-      // every list has the same tactile "give" Namida is known for.
-      scrollBehavior: const _PapaScrollBehavior(),
-      home: const Root(),
+    final s = context.read<AppState>();
+    // Rebuild the whole app (fresh theme + PA-colored widgets) when settings
+    // that affect appearance change — the AMOLED toggle swaps PA surfaces.
+    return AnimatedBuilder(
+      animation: s.settings,
+      builder: (context, _) => MaterialApp(
+        title: 'Papa Audio',
+        debugShowCheckedModeBanner: false,
+        theme: papaTheme(),
+        // App-wide bouncy scroll (with a glow fallback for reduced-motion), so
+        // every list has the same tactile "give" Namida is known for.
+        scrollBehavior: const _PapaScrollBehavior(),
+        home: const Root(),
+      ),
     );
   }
 }

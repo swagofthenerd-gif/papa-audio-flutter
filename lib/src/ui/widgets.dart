@@ -96,7 +96,7 @@ class ArtPlaceholder extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight);
     } else {
-      gradient = const LinearGradient(
+      gradient = LinearGradient(
           colors: [PA.surfaceElevated, PA.surface],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight);

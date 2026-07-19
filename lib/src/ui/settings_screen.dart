@@ -134,6 +134,16 @@ class SettingsScreen extends StatelessWidget {
             ),
             SwitchListTile(
               activeThumbColor: PA.accent,
+              secondary:
+                  const Icon(Icons.contrast, color: PA.textSecondary),
+              title: const Text('AMOLED black'),
+              subtitle: const Text('Pure-black backgrounds for OLED screens',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.amoled,
+              onChanged: (v) => st.update(() => st.amoled = v),
+            ),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
               secondary: const Icon(Icons.fast_forward, color: PA.textSecondary),
               title: const Text('Skip silence'),
               subtitle: const Text('Jump over silent stretches in tracks',

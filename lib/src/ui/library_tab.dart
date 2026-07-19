@@ -665,9 +665,101 @@ class LocalAlbumScreen extends StatelessWidget {
               );
             },
           ),
+          // "More like this" — other albums by the same artist, then the same
+          // genre, from your library.
+          SliverToBoxAdapter(child: _MoreLikeAlbum(album: album)),
           const SliverToBoxAdapter(child: SizedBox(height: 80)),
         ],
       ),
+    );
+  }
+}
+
+/// Related-albums shelf for the local album page: same artist first, then the
+/// same genre, drawn from the on-device library. Hidden when nothing relates.
+class _MoreLikeAlbum extends StatelessWidget {
+  final LocalAlbum album;
+  const _MoreLikeAlbum({required this.album});
+
+  @override
+  Widget build(BuildContext context) {
+    final lib = context.read<AppState>().localLibrary;
+    final artistNorm = normText(album.artist);
+    final myGenres = <String>{
+      for (final t in album.tracks)
+        if (t.genre != null && t.genre!.isNotEmpty) normText(t.genre!)
+    };
+    final sameArtist = <LocalAlbum>[];
+    final sameGenre = <LocalAlbum>[];
+    for (final a in lib.albums) {
+      if (a.albumId == album.albumId) continue;
+      if (normText(a.artist) == artistNorm) {
+        sameArtist.add(a);
+      } else if (myGenres.isNotEmpty &&
+          a.tracks.any((t) =>
+              t.genre != null && myGenres.contains(normText(t.genre!)))) {
+        sameGenre.add(a);
+      }
+    }
+    final related = [...sameArtist, ...sameGenre];
+    if (related.isEmpty) return const SizedBox.shrink();
+    final title = sameArtist.isNotEmpty
+        ? 'More from ${album.artist}'
+        : 'More like this';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+          child: Text(title,
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3)),
+        ),
+        SizedBox(
+          height: 190,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: related.length.clamp(0, 20),
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (_, i) {
+              final a = related[i];
+              return GestureDetector(
+                onTap: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => LocalAlbumScreen(album: a))),
+                child: SizedBox(
+                  width: 140,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(PA.rMd),
+                        child: TrackArt(
+                            artUri: 'localart://${a.artTrackId}/${a.albumId}',
+                            size: 140,
+                            px: 300),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(a.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 13)),
+                      Text(a.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: PA.textSecondary, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

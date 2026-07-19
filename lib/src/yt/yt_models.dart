@@ -60,7 +60,13 @@ class YtMusicItem {
     const typeWords = {
       'song', 'video', 'artist', 'album', 'single', 'ep', 'playlist'
     };
-    final segs = subtitle.split(' · ').map((s) => s.trim()).toList();
+    // YT uses both middot (·) and bullet (•) as separators across surfaces.
+    final segs = subtitle
+        .split(RegExp(r'\s*[·•]\s*'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (segs.isEmpty) return 'YouTube';
     for (final s in segs) {
       if (s.isEmpty) continue;
       final low = s.toLowerCase();

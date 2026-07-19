@@ -99,6 +99,8 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
   }
 
   List<Track> _tracks = const []; // memoized once at load
+  List<YtMusicItem> _relatedAlbums = const []; // "More from artist" (albums)
+  String _relatedArtist = '';
 
   Future<void> _load() async {
     final tube = context.read<AppState>().yt.tube;
@@ -115,11 +117,48 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
         _tracks = _extractTracks(shelves);
         _loading = false;
       });
+      // For album pages, surface "More from <artist>" — YT album browse
+      // usually omits related albums, so fetch the artist's other albums.
+      // The album's subtitle often lacks the artist ("Album · 2026"), so take
+      // the artist from the album's actual tracks instead.
+      if (item.kind == YtItemKind.album && _tracks.isNotEmpty) {
+        final artist = _tracks.first.artist;
+        if (artist.isNotEmpty && artist != 'YouTube') {
+          _loadRelatedAlbums(tube, item, artist);
+        }
+      }
     } catch (e) {
       if (mounted) setState(() {
             _error = e.toString();
             _loading = false;
           });
+    }
+  }
+
+  Future<void> _loadRelatedAlbums(
+      dynamic tube, YtMusicItem album, String artist) async {
+    try {
+      final shelves = await tube.search(artist, filter: 'albums');
+      final out = <YtMusicItem>[];
+      final seen = <String>{album.browseId ?? ''};
+      for (final s in (shelves as List)) {
+        for (final it in (s.items as List)) {
+          final m = it as YtMusicItem;
+          if (m.kind == YtItemKind.album &&
+              m.browseId != null &&
+              seen.add(m.browseId!)) {
+            out.add(m);
+          }
+        }
+      }
+      if (mounted && out.isNotEmpty) {
+        setState(() {
+          _relatedAlbums = out.take(20).toList();
+          _relatedArtist = artist;
+        });
+      }
+    } catch (_) {
+      // best-effort — no related shelf on failure
     }
   }
 
@@ -188,6 +227,13 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
                       itemCount: tracks.length,
                       itemBuilder: (_, i) => _trackTile(s, tracks, i),
                     ),
+                    if (_relatedAlbums.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: YtShelfRow(
+                            shelf: YtShelf(
+                                title: 'More from $_relatedArtist',
+                                items: _relatedAlbums)),
+                      ),
                     const SliverToBoxAdapter(child: SizedBox(height: 24)),
                   ],
                 ),

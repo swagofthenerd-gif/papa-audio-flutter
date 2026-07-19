@@ -621,7 +621,8 @@ class _Card extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    return _PressScale(
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(PA.rMd),
@@ -670,6 +671,39 @@ class _Card extends StatelessWidget {
             ],
           ),
         ),
+      ),
+      ),
+    );
+  }
+}
+
+/// Scales its child down slightly while pressed — the tactile "give" on tap
+/// that Namida/Apple Music have. Uses a Listener so it never competes with the
+/// child's own tap/long-press handlers.
+class _PressScale extends StatefulWidget {
+  final Widget child;
+  const _PressScale({required this.child});
+  @override
+  State<_PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<_PressScale> {
+  double _scale = 1;
+  void _set(double v) {
+    if (_scale != v) setState(() => _scale = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(0.96),
+      onPointerUp: (_) => _set(1),
+      onPointerCancel: (_) => _set(1),
+      child: AnimatedScale(
+        scale: _scale,
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.easeOut,
+        child: widget.child,
       ),
     );
   }

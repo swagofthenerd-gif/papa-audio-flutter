@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
@@ -933,6 +934,13 @@ class TrackListScreen extends StatefulWidget {
 class _TrackListScreenState extends State<TrackListScreen> {
   bool _searching = false;
   String _query = '';
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -977,17 +985,138 @@ class _TrackListScreenState extends State<TrackListScreen> {
                 tracks: tracks, collectionId: widget.collectionId),
           ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.only(bottom: 80),
-              itemCount: tracks.length,
-              itemBuilder: (_, i) => TrackTile(
-                  track: tracks[i],
-                  onTap: () => s.playTrackInList(tracks, i,
-                      collectionId: widget.collectionId)),
+            child: JumpToTrackPill(
+              scroll: _scroll,
+              tracks: tracks,
+              child: ListView.builder(
+                controller: _scroll,
+                padding: const EdgeInsets.only(bottom: 80),
+                itemCount: tracks.length,
+                itemBuilder: (_, i) => TrackTile(
+                    track: tracks[i],
+                    onTap: () => s.playTrackInList(tracks, i,
+                        collectionId: widget.collectionId)),
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Namida-style floating pill: appears while scrolling a long track list and
+/// jumps to the now-playing track. Its icon reflects whether that track is
+/// above or below the current viewport (or a disc when already in view).
+/// Assumes a uniform ~64px row height (TrackTile).
+class JumpToTrackPill extends StatefulWidget {
+  final ScrollController scroll;
+  final List<Track> tracks;
+  final Widget child;
+  const JumpToTrackPill(
+      {super.key,
+      required this.scroll,
+      required this.tracks,
+      required this.child});
+
+  @override
+  State<JumpToTrackPill> createState() => _JumpToTrackPillState();
+}
+
+class _JumpToTrackPillState extends State<JumpToTrackPill> {
+  static const _rowH = 64.0;
+  bool _visible = false;
+  Timer? _hide;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scroll.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _hide?.cancel();
+    widget.scroll.removeListener(_onScroll);
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_visible) setState(() => _visible = true);
+    _hide?.cancel();
+    _hide = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  int _currentRow(AppState s) {
+    final cur = s.playerService.currentTrack;
+    if (cur == null) return -1;
+    return widget.tracks.indexWhere((t) => t.key == cur.key);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.read<AppState>();
+    return Stack(
+      children: [
+        widget.child,
+        Positioned(
+          right: 12,
+          bottom: 16,
+          child: AnimatedScale(
+            scale: _visible ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutBack,
+            child: AnimatedBuilder(
+              animation: s.playerService.queueRevision,
+              builder: (_, _) {
+                final row = _currentRow(s);
+                if (row < 0) return const SizedBox.shrink();
+                IconData icon = Icons.album;
+                if (widget.scroll.hasClients) {
+                  final target = row * _rowH;
+                  final off = widget.scroll.offset;
+                  if (target < off - _rowH) icon = Icons.keyboard_arrow_up;
+                  else if (target > off + _rowH * 4) {
+                    icon = Icons.keyboard_arrow_down;
+                  }
+                }
+                return Material(
+                  color: PA.accent,
+                  shape: const StadiumBorder(),
+                  elevation: 4,
+                  child: InkWell(
+                    customBorder: const StadiumBorder(),
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      widget.scroll.animateTo(
+                        (row * _rowH)
+                            .clamp(0.0, widget.scroll.position.maxScrollExtent),
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeOutCubic,
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(icon, size: 18, color: Colors.black),
+                        const SizedBox(width: 4),
+                        const Text('Playing',
+                            style: TextStyle(
+                                color: Colors.black,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

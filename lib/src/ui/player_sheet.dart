@@ -46,7 +46,25 @@ class _PlayerSheetState extends State<PlayerSheet>
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 380),
-  )..addStatusListener((_) => setState(() {}));
+  )
+    ..addStatusListener((_) => setState(() {}))
+    ..addListener(_syncImmersive);
+
+  bool _immersive = false;
+
+  /// Hide the status bar while the player is (near) fully expanded, restore it
+  /// as it collapses — the artwork gets the top of the screen. Only the top
+  /// bar is hidden (nav bar stays for the queue drag), which avoids Android's
+  /// intrusive "swipe down to exit" immersive banner.
+  void _syncImmersive() {
+    final want = _c.value > 0.9;
+    if (want == _immersive) return;
+    _immersive = want;
+    SystemChrome.setEnabledSystemUIMode(
+      want ? SystemUiMode.manual : SystemUiMode.edgeToEdge,
+      overlays: want ? const [SystemUiOverlay.bottom] : SystemUiOverlay.values,
+    );
+  }
 
   /// In-player queue panel position (0 hidden → 1 open). Dragging up while
   /// expanded pulls it in, Namida-style.
@@ -148,6 +166,10 @@ class _PlayerSheetState extends State<PlayerSheet>
   @override
   void dispose() {
     if (PlayerSheet.backHandler != null) PlayerSheet.backHandler = null;
+    if (_immersive) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge,
+          overlays: SystemUiOverlay.values);
+    }
     lyricsOn.dispose();
     videoOn.dispose();
     _c.dispose();
@@ -228,7 +250,10 @@ class _PlayerSheetState extends State<PlayerSheet>
           return const SizedBox.shrink();
         }
         final size = MediaQuery.sizeOf(context);
-        final topInset = MediaQuery.paddingOf(context).top;
+        // Floor the top inset: immersive mode (expanded) reports 0, which
+        // would jump the header up and shift the artwork morph target. A
+        // stable minimum keeps the layout put across the transition.
+        final topInset = math.max(MediaQuery.paddingOf(context).top, 24.0);
         final collapsedTop = size.height - widget.navHeight - PlayerSheet.miniHeight;
         final travel = collapsedTop; // distance between the two states
         // Artwork side: capped by width AND by what the column below it needs

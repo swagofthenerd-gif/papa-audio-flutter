@@ -145,6 +145,16 @@ class PlayerService {
     return _queue[i];
   }
 
+  /// The track that would audibly play on next()/previous() — shuffle- and
+  /// loop-aware (just_audio computes these over its effective order). The
+  /// artwork carousel uses them so the visual neighbor always matches the
+  /// audible one.
+  Track? get effectiveNextTrack => trackAt(_player.nextIndex);
+  Track? get effectivePreviousTrack => trackAt(_player.previousIndex);
+
+  Track? trackAt(int? i) =>
+      (i == null || i < 0 || i >= _queue.length) ? null : _queue[i];
+
   /// Where the audio actually comes from: an explicit URI (local file,
   /// MediaStore content://, YouTube stream) or the bridge's /stream endpoint.
   AudioSource _sourceFor(Track t) {

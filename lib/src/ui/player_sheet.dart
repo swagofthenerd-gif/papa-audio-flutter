@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
@@ -34,14 +35,34 @@ class PlayerSheet extends StatefulWidget {
 }
 
 class _PlayerSheetState extends State<PlayerSheet>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 380),
   )..addStatusListener((_) => setState(() {}));
 
+  /// In-player queue panel position (0 hidden → 1 open). Dragging up while
+  /// expanded pulls it in, Namida-style.
+  late final AnimationController _q = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+  );
+  bool _qDragging = false;
+
   double get t => _c.value;
   bool get expanded => t > 0.5;
+
+  /// Critically-damped spring settle that carries the finger's release
+  /// velocity — this is what makes flings feel continuous instead of snapping
+  /// to a canned tween.
+  static void _spring(AnimationController c, double target, double velocity) {
+    c.animateWith(SpringSimulation(
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 1.0),
+      c.value,
+      target,
+      velocity,
+    ));
+  }
 
   /// Lyrics view replaces the artwork while on (toggled by double-tap or the
   /// lyrics button). Lives here so the morphing artwork can hide with it.
@@ -92,6 +113,7 @@ class _PlayerSheetState extends State<PlayerSheet>
     lyricsOn.dispose();
     videoOn.dispose();
     _c.dispose();
+    _q.dispose();
     super.dispose();
   }
 
@@ -120,17 +142,32 @@ class _PlayerSheetState extends State<PlayerSheet>
   }
 
   // ── Vertical drag: the sheet follows the finger, then springs ──────────────
+  // While fully expanded, an upward drag (or any drag with the queue panel
+  // already out) is routed to the queue panel instead of the sheet.
 
-  void _onVDragUpdate(DragUpdateDetails d, double travel) {
+  void _onVDragUpdate(DragUpdateDetails d, double travel, double qTravel) {
+    if (_qDragging || _q.value > 0.001 || (t > 0.999 && d.delta.dy < 0)) {
+      _qDragging = true;
+      _q.value = (_q.value - d.delta.dy / qTravel).clamp(0.0, 1.0);
+      return;
+    }
     _c.value -= d.delta.dy / travel;
   }
 
-  void _onVDragEnd(DragEndDetails d, double travel) {
+  void _onVDragEnd(DragEndDetails d, double travel, double qTravel) {
+    if (_qDragging) {
+      _qDragging = false;
+      final fling = -d.velocity.pixelsPerSecond.dy / qTravel;
+      final target =
+          fling.abs() > 0.7 ? (fling > 0 ? 1.0 : 0.0) : (_q.value > 0.5 ? 1.0 : 0.0);
+      _spring(_q, target, fling);
+      return;
+    }
     final fling = -d.velocity.pixelsPerSecond.dy / travel;
     if (fling.abs() > 0.7) {
-      _c.fling(velocity: fling);
+      _spring(_c, fling > 0 ? 1.0 : 0.0, fling);
     } else {
-      _c.fling(velocity: t > 0.5 ? 2.2 : -2.2);
+      _spring(_c, t > 0.5 ? 1.0 : 0.0, fling);
     }
   }
 
@@ -170,9 +207,38 @@ class _PlayerSheetState extends State<PlayerSheet>
           lyricsOn: lyricsOn,
           videoOn: videoOn,
           onToggleVideo: _toggleVideo,
-          onCollapse: () => _c.fling(velocity: -2.2),
+          onCollapse: () => _spring(_c, 0, -3),
+          onQueue: () => _spring(_q, 1, 4),
         );
         final miniBar = _MiniBar(ps: ps, track: track);
+        // Swipeable artwork carousel — mounted only while fully expanded so
+        // the morphing single-art keeps owning every in-between frame.
+        final carousel = _ArtCarousel(
+          ps: ps,
+          track: track,
+          side: fullSide,
+          lyricsOn: lyricsOn,
+        );
+        // Pseudo-blur backdrop: a tiny decode stretched full-screen; bilinear
+        // upscaling reads as a blur at near-zero cost (no ImageFiltered).
+        final bgArt = IgnorePointer(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              width: 60,
+              height: 60,
+              child: TrackArt(
+                artUri: track.artUri,
+                artPath: track.artPath,
+                size: 60,
+                radius: 0,
+                px: 32,
+              ),
+            ),
+          ),
+        );
+        final qHeight = size.height * 0.68;
         final art = IgnorePointer(
           child: SizedBox(
             width: fullSide,
@@ -195,10 +261,15 @@ class _PlayerSheetState extends State<PlayerSheet>
         return PopScope(
           canPop: !expanded,
           onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _c.fling(velocity: -2.2);
+            if (didPop) return;
+            if (_q.value > 0.05) {
+              _spring(_q, 0, -4); // back closes the queue panel first
+            } else {
+              _spring(_c, 0, -3);
+            }
           },
           child: AnimatedBuilder(
-            animation: _c,
+            animation: Listenable.merge([_c, _q]),
             builder: (context, _) {
               final top = collapsedTop * (1 - t);
               // Collapsed, the sheet is ONLY the mini strip (the nav bar stays
@@ -217,9 +288,11 @@ class _PlayerSheetState extends State<PlayerSheet>
                     bottom: bottom,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: t < 0.1 ? () => _c.fling(velocity: 2.2) : null,
-                      onVerticalDragUpdate: (d) => _onVDragUpdate(d, travel),
-                      onVerticalDragEnd: (d) => _onVDragEnd(d, travel),
+                      onTap: t < 0.1 ? () => _spring(_c, 1, 3) : null,
+                      onVerticalDragUpdate: (d) =>
+                          _onVDragUpdate(d, travel, qHeight),
+                      onVerticalDragEnd: (d) =>
+                          _onVDragEnd(d, travel, qHeight),
                       child: Container(
                         decoration: BoxDecoration(
                           // Expanded background tints toward the artwork's
@@ -237,13 +310,28 @@ class _PlayerSheetState extends State<PlayerSheet>
                         ),
                         child: Stack(
                           children: [
+                            // Blurry artwork backdrop under everything (only
+                            // near-expanded, faded in over the last 10%).
+                            if (t > 0.9)
+                              Positioned.fill(
+                                child: Opacity(
+                                  opacity:
+                                      0.28 * ((t - 0.9) / 0.1).clamp(0.0, 1.0),
+                                  child: bgArt,
+                                ),
+                              ),
                             if (fullOpacity > 0)
                               Positioned.fill(
                                 child: Opacity(
                                   opacity: fullOpacity,
                                   child: IgnorePointer(
                                     ignoring: fullOpacity < 0.4,
-                                    child: fullPlayer,
+                                    // Parallax: content settles up into place
+                                    // slightly behind the sheet itself.
+                                    child: Transform.translate(
+                                      offset: Offset(0, (1 - t) * 40),
+                                      child: fullPlayer,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -269,9 +357,16 @@ class _PlayerSheetState extends State<PlayerSheet>
                               rect: artRect,
                               child: ValueListenableBuilder<bool>(
                                 valueListenable: lyricsOn,
-                                builder: (_, lyr, child) => Opacity(
-                                    opacity: lyr && t > 0.5 ? 0 : 1,
-                                    child: child),
+                                builder: (_, lyr, child) {
+                                  if (lyr && t > 0.5) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  // Fully expanded: the swipeable carousel
+                                  // takes over the rect. Any collapse drag
+                                  // (t < 1) hands back to the morphing art.
+                                  if (t >= 0.999) return carousel;
+                                  return child!;
+                                },
                                 child: ClipRRect(
                                   borderRadius:
                                       BorderRadius.circular(4 + 6 * t),
@@ -290,6 +385,45 @@ class _PlayerSheetState extends State<PlayerSheet>
                                   builder: (_, on, _) => on
                                       ? _VideoOverlay(radius: 4 + 6 * t)
                                       : const SizedBox.shrink(),
+                                ),
+                              ),
+                            // In-player queue panel: slides up from the bottom
+                            // edge, pulled by the drag router above.
+                            if (t > 0.95 && _q.value > 0.001)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                height: qHeight,
+                                bottom: qHeight * (_q.value - 1),
+                                child: Material(
+                                  color: PA.surface,
+                                  borderRadius: const BorderRadius.vertical(
+                                      top: Radius.circular(16)),
+                                  clipBehavior: Clip.antiAlias,
+                                  elevation: 8,
+                                  child: Column(
+                                    children: [
+                                      // Grab handle — also a tap target to close.
+                                      GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: () => _spring(_q, 0, -4),
+                                        child: Center(
+                                          child: Container(
+                                            width: 36,
+                                            height: 4,
+                                            margin: const EdgeInsets.only(
+                                                top: 8, bottom: 2),
+                                            decoration: BoxDecoration(
+                                              color: PA.textMuted,
+                                              borderRadius:
+                                                  BorderRadius.circular(2),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(child: QueuePanel(ps: ps)),
+                                    ],
+                                  ),
                                 ),
                               ),
                           ],
@@ -456,6 +590,234 @@ class _AnimatedPlayPauseState extends State<_AnimatedPlayPause>
       );
 }
 
+/// Swipeable artwork carousel for the expanded player: the current art plus
+/// its audible neighbors (shuffle/loop-aware via PlayerService), dragged with
+/// the finger and spring-settled. Committing a swipe changes the track; the
+/// resulting index-change rebuild recenters the carousel on the new current.
+class _ArtCarousel extends StatefulWidget {
+  final PlayerService ps;
+  final Track track;
+  final double side;
+  final ValueNotifier<bool> lyricsOn;
+  const _ArtCarousel(
+      {required this.ps,
+      required this.track,
+      required this.side,
+      required this.lyricsOn});
+
+  @override
+  State<_ArtCarousel> createState() => _ArtCarouselState();
+}
+
+class _ArtCarouselState extends State<_ArtCarousel>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _settle =
+      AnimationController.unbounded(vsync: this)
+        ..addListener(() => setState(() => _drag = _settle.value));
+  double _drag = 0;
+  bool _switching = false; // swipe committed, waiting for the track change
+
+  static const _gap = 24.0;
+
+  @override
+  void didUpdateWidget(covariant _ArtCarousel old) {
+    super.didUpdateWidget(old);
+    if (old.track.key != widget.track.key) {
+      // New current track — it was the card the swipe centered, so snapping
+      // the offset back to 0 under the new build is seamless.
+      _settle.stop();
+      _drag = 0;
+      _switching = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _settle.dispose();
+    super.dispose();
+  }
+
+  void _to(double target, double velocity) {
+    _settle.value = _drag;
+    _settle.animateWith(SpringSimulation(
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 500, ratio: 1.0),
+      _drag,
+      target,
+      velocity,
+    ));
+  }
+
+  Future<void> _end(DragEndDetails d) async {
+    if (_switching) return;
+    final v = d.velocity.pixelsPerSecond.dx;
+    final side = widget.side;
+    final commit = _drag.abs() > side / 3 || v.abs() > 700;
+    final forward = _drag < 0 || v < -700;
+    final neighbor = forward
+        ? widget.ps.effectiveNextTrack
+        : widget.ps.effectivePreviousTrack;
+    if (!commit || neighbor == null) {
+      _to(0, v);
+      return;
+    }
+    _switching = true;
+    HapticFeedback.selectionClick();
+    _to(forward ? -(side + _gap) : (side + _gap), v);
+    forward ? await widget.ps.next() : await widget.ps.previous();
+    // The index-change rebuild recenters via didUpdateWidget. If it never
+    // comes (e.g. loop-one keeps the same index), snap back.
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted && _switching) {
+        _switching = false;
+        _to(0, 0);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final side = widget.side;
+    final prev = widget.ps.effectivePreviousTrack;
+    final next = widget.ps.effectiveNextTrack;
+
+    Widget slot(Track? tr, double off) {
+      final x = off + _drag;
+      // Cards shrink slightly as they leave center — cheap depth cue.
+      final scale = 1 - 0.08 * (x.abs() / (side + _gap)).clamp(0.0, 1.0);
+      return Positioned(
+        left: x,
+        top: 0,
+        width: side,
+        height: side,
+        child: Transform.scale(
+          scale: scale,
+          child: tr == null
+              ? const SizedBox.shrink()
+              : RepaintBoundary(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: TrackArt(
+                      artUri: tr.artUri,
+                      artPath: tr.artPath,
+                      size: side,
+                      radius: 0,
+                      px: 800,
+                    ),
+                  ),
+                ),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onDoubleTap: () => widget.lyricsOn.value = !widget.lyricsOn.value,
+      onHorizontalDragUpdate: (d) {
+        if (!_switching) setState(() => _drag += d.delta.dx);
+      },
+      onHorizontalDragEnd: _end,
+      child: SizedBox(
+        width: side,
+        height: side,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            slot(prev, -(side + _gap)),
+            slot(next, side + _gap),
+            slot(widget.track, 0), // current on top
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Single-line text that auto-scrolls when it overflows, with a hold at each
+/// end. Renders a plain Text when it fits — zero cost for short titles.
+class _Marquee extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  const _Marquee({required this.text, required this.style});
+  @override
+  State<_Marquee> createState() => _MarqueeState();
+}
+
+class _MarqueeState extends State<_Marquee>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(seconds: 7))
+    ..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (_, cons) {
+      final tp = TextPainter(
+        text: TextSpan(text: widget.text, style: widget.style),
+        maxLines: 1,
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final overflow = tp.width - cons.maxWidth;
+      if (overflow <= 0) {
+        return Text(widget.text,
+            maxLines: 1, overflow: TextOverflow.ellipsis, style: widget.style);
+      }
+      return ClipRect(
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (_, _) {
+            // Hold 25% at each end, scroll across the middle 50%.
+            final p = ((_c.value - 0.25) / 0.5).clamp(0.0, 1.0);
+            return Transform.translate(
+              offset: Offset(-overflow * p, 0),
+              child: SizedBox(
+                width: tp.width,
+                child: Text(widget.text,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.visible,
+                    style: widget.style),
+              ),
+            );
+          },
+        ),
+      );
+    });
+  }
+}
+
+/// Shrinks its child slightly while pressed. Listener-based so it never
+/// competes with the child's own tap/long-press handlers.
+class _PressScale extends StatefulWidget {
+  final Widget child;
+  const _PressScale({required this.child});
+  @override
+  State<_PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<_PressScale> {
+  bool _down = false;
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => setState(() => _down = true),
+      onPointerUp: (_) => setState(() => _down = false),
+      onPointerCancel: (_) => setState(() => _down = false),
+      child: AnimatedScale(
+        scale: _down ? 0.88 : 1.0,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 /// The YouTube video overlay: fills the artwork rect while active. Its own
 /// audio comes from the muxed stream, so just_audio stays paused meanwhile.
 class _VideoOverlay extends StatelessWidget {
@@ -505,6 +867,7 @@ class _FullPlayer extends StatelessWidget {
   final ValueNotifier<bool> videoOn;
   final Future<void> Function(String videoId) onToggleVideo;
   final VoidCallback onCollapse;
+  final VoidCallback onQueue;
   const _FullPlayer(
       {required this.ps,
       required this.track,
@@ -513,7 +876,8 @@ class _FullPlayer extends StatelessWidget {
       required this.lyricsOn,
       required this.videoOn,
       required this.onToggleVideo,
-      required this.onCollapse});
+      required this.onCollapse,
+      required this.onQueue});
 
   @override
   Widget build(BuildContext context) {
@@ -538,7 +902,7 @@ class _FullPlayer extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.queue_music),
-                onPressed: () => showQueueSheet(context, ps),
+                onPressed: onQueue,
               ),
             ],
           ),
@@ -581,9 +945,8 @@ class _FullPlayer extends StatelessWidget {
                         onCollapse();
                         openAlbum(context, context.read<AppState>(), track);
                       },
-                      child: Text(track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      child: _Marquee(
+                          text: track.title,
                           style: const TextStyle(
                               fontSize: 22, fontWeight: FontWeight.bold)),
                     ),
@@ -593,9 +956,8 @@ class _FullPlayer extends StatelessWidget {
                         onCollapse();
                         openArtist(context, context.read<AppState>(), track);
                       },
-                      child: Text(track.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      child: _Marquee(
+                          text: track.artist,
                           style: const TextStyle(
                               fontSize: 15, color: PA.textSecondary)),
                     ),
@@ -890,9 +1252,11 @@ class _SeekBarState extends State<SeekBar> {
                     )
                   : SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        thumbShape:
-                            const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        // Track and thumb grow while scrubbing for feedback.
+                        trackHeight: _dragValue != null ? 5 : 3,
+                        thumbShape: RoundSliderThumbShape(
+                            enabledThumbRadius:
+                                _dragValue != null ? 8.5 : 6),
                         overlayShape:
                             const RoundSliderOverlayShape(overlayRadius: 14),
                         activeTrackColor: PA.accent,
@@ -1071,10 +1435,12 @@ class _TransportControlsState extends State<TransportControls> {
           onLongPressStart: (_) => _startHoldSeek(-1),
           onLongPressEnd: (_) => _stopHoldSeek(),
           onLongPressCancel: _stopHoldSeek,
-          child: IconButton(
-            icon: const Icon(Icons.skip_previous, size: 38),
-            color: Colors.white,
-            onPressed: ps.previousSmart,
+          child: _PressScale(
+            child: IconButton(
+              icon: const Icon(Icons.skip_previous, size: 38),
+              color: Colors.white,
+              onPressed: ps.previousSmart,
+            ),
           ),
         ),
         StreamBuilder<PlayerState>(
@@ -1087,18 +1453,20 @@ class _TransportControlsState extends State<TransportControls> {
                     state?.processingState == ProcessingState.buffering;
             return GestureDetector(
               onTap: ps.togglePlay,
-              child: Container(
-                width: 68,
-                height: 68,
-                decoration: const BoxDecoration(
-                    color: Colors.white, shape: BoxShape.circle),
-                child: buffering
-                    ? const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: CircularProgressIndicator(
-                            strokeWidth: 3, color: Colors.black))
-                    : _AnimatedPlayPause(
-                        playing: playing, size: 40, color: Colors.black),
+              child: _PressScale(
+                child: Container(
+                  width: 68,
+                  height: 68,
+                  decoration: const BoxDecoration(
+                      color: Colors.white, shape: BoxShape.circle),
+                  child: buffering
+                      ? const Padding(
+                          padding: EdgeInsets.all(20),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 3, color: Colors.black))
+                      : _AnimatedPlayPause(
+                          playing: playing, size: 40, color: Colors.black),
+                ),
               ),
             );
           },
@@ -1107,10 +1475,12 @@ class _TransportControlsState extends State<TransportControls> {
           onLongPressStart: (_) => _startHoldSeek(1),
           onLongPressEnd: (_) => _stopHoldSeek(),
           onLongPressCancel: _stopHoldSeek,
-          child: IconButton(
-            icon: const Icon(Icons.skip_next, size: 38),
-            color: Colors.white,
-            onPressed: ps.next,
+          child: _PressScale(
+            child: IconButton(
+              icon: const Icon(Icons.skip_next, size: 38),
+              color: Colors.white,
+              onPressed: ps.next,
+            ),
           ),
         ),
         StreamBuilder<LoopMode>(
@@ -1142,14 +1512,28 @@ void showQueueSheet(BuildContext context, PlayerService ps) {
   );
 }
 
-class _QueueSheet extends StatefulWidget {
+class _QueueSheet extends StatelessWidget {
   final PlayerService ps;
   const _QueueSheet({required this.ps});
   @override
-  State<_QueueSheet> createState() => _QueueSheetState();
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.65,
+      child: QueuePanel(ps: ps),
+    );
+  }
 }
 
-class _QueueSheetState extends State<_QueueSheet> {
+/// The queue list itself — shared by the modal sheet and the in-player
+/// slide-up panel. Reorder, swipe-to-remove with undo, tap-to-jump.
+class QueuePanel extends StatefulWidget {
+  final PlayerService ps;
+  const QueuePanel({super.key, required this.ps});
+  @override
+  State<QueuePanel> createState() => _QueuePanelState();
+}
+
+class _QueuePanelState extends State<QueuePanel> {
   static const _rowHeight = 64.0;
   late final ScrollController _scroll = ScrollController(
     // Open with the playing track a couple of rows from the top.
@@ -1167,9 +1551,7 @@ class _QueueSheetState extends State<_QueueSheet> {
   @override
   Widget build(BuildContext context) {
     final ps = widget.ps;
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.65,
-      child: ValueListenableBuilder<int>(
+    return ValueListenableBuilder<int>(
         valueListenable: ps.queueRevision,
         builder: (_, _, _) => StreamBuilder<int?>(
           stream: ps.currentIndex,
@@ -1307,7 +1689,6 @@ class _QueueSheetState extends State<_QueueSheet> {
             );
           },
         ),
-      ),
     );
   }
 }

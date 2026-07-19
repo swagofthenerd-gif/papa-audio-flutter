@@ -268,7 +268,8 @@ class _PlayerSheetState extends State<PlayerSheet>
         // Pseudo-blur backdrop: a tiny decode stretched full-screen; bilinear
         // upscaling reads as a blur at near-zero cost (no ImageFiltered).
         final bgArt = IgnorePointer(
-          child: FittedBox(
+          child: RepaintBoundary(
+            child: FittedBox(
             fit: BoxFit.cover,
             clipBehavior: Clip.hardEdge,
             child: SizedBox(
@@ -283,8 +284,39 @@ class _PlayerSheetState extends State<PlayerSheet>
               ),
             ),
           ),
+          ),
         );
         final qHeight = size.height * 0.68;
+        // Built ONCE per stream event — the per-frame builder only positions
+        // it. Rebuilding a ReorderableListView every drag frame is jank.
+        final queuePanel = Material(
+          color: PA.surface,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(16)),
+          clipBehavior: Clip.antiAlias,
+          elevation: 8,
+          child: Column(
+            children: [
+              // Grab handle — also a tap target to close.
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _spring(_q, 0, -4),
+                child: Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 8, bottom: 2),
+                    decoration: BoxDecoration(
+                      color: PA.textMuted,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(child: QueuePanel(ps: ps)),
+            ],
+          ),
+        );
         final art = IgnorePointer(
           child: SizedBox(
             width: fullSide,
@@ -468,36 +500,7 @@ class _PlayerSheetState extends State<PlayerSheet>
                                 right: 0,
                                 height: qHeight,
                                 bottom: qHeight * (_q.value - 1),
-                                child: Material(
-                                  color: PA.surface,
-                                  borderRadius: const BorderRadius.vertical(
-                                      top: Radius.circular(16)),
-                                  clipBehavior: Clip.antiAlias,
-                                  elevation: 8,
-                                  child: Column(
-                                    children: [
-                                      // Grab handle — also a tap target to close.
-                                      GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTap: () => _spring(_q, 0, -4),
-                                        child: Center(
-                                          child: Container(
-                                            width: 36,
-                                            height: 4,
-                                            margin: const EdgeInsets.only(
-                                                top: 8, bottom: 2),
-                                            decoration: BoxDecoration(
-                                              color: PA.textMuted,
-                                              borderRadius:
-                                                  BorderRadius.circular(2),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      Expanded(child: QueuePanel(ps: ps)),
-                                    ],
-                                  ),
-                                ),
+                                child: queuePanel,
                               ),
                           ],
                         ),
@@ -692,12 +695,18 @@ class _ArtCarouselState extends State<_ArtCarousel>
   double _drag = 0;
   bool _switching = false; // swipe committed, waiting for the track change
 
+  // Art subtrees cached by track key: drag frames then reuse the exact same
+  // widget instances, so Flutter skips rebuilding the image subtree entirely.
+  final Map<String, Widget> _artCache = {};
+
   static const _gap = 24.0;
 
   @override
   void didUpdateWidget(covariant _ArtCarousel old) {
     super.didUpdateWidget(old);
     if (old.track.key != widget.track.key) {
+      // Bounded cache: reset when it grows past the tracks near current.
+      if (_artCache.length > 8) _artCache.clear();
       // New current track — it was the card the swipe centered, so snapping
       // the offset back to 0 under the new build is seamless.
       _settle.stop();
@@ -769,29 +778,32 @@ class _ArtCarouselState extends State<_ArtCarousel>
           scale: scale,
           child: tr == null
               ? const SizedBox.shrink()
-              : RepaintBoundary(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: [
-                        if (widget.glow != null && centered > 0.2)
-                          BoxShadow(
-                            color: widget.glow!
-                                .withValues(alpha: 0.45 * centered),
-                            blurRadius: 32,
-                            spreadRadius: 2,
-                            offset: const Offset(0, 10),
-                          ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: TrackArt(
-                        artUri: tr.artUri,
-                        artPath: tr.artPath,
-                        size: side,
-                        radius: 0,
-                        px: 800,
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      if (widget.glow != null && centered > 0.2)
+                        BoxShadow(
+                          color: widget.glow!
+                              .withValues(alpha: 0.45 * centered),
+                          blurRadius: 32,
+                          spreadRadius: 2,
+                          offset: const Offset(0, 10),
+                        ),
+                    ],
+                  ),
+                  child: _artCache.putIfAbsent(
+                    tr.key,
+                    () => RepaintBoundary(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: TrackArt(
+                          artUri: tr.artUri,
+                          artPath: tr.artPath,
+                          size: side,
+                          radius: 0,
+                          px: 800,
+                        ),
                       ),
                     ),
                   ),
@@ -836,8 +848,12 @@ class _Marquee extends StatefulWidget {
 class _MarqueeState extends State<_Marquee>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(seconds: 7))
-    ..repeat(reverse: true);
+      vsync: this, duration: const Duration(seconds: 7));
+
+  // Measured text width, cached by (text, style) — TextPainter.layout is not
+  // free and build runs per frame while the sheet animates.
+  double? _textW;
+  String? _measuredText;
 
   @override
   void dispose() {
@@ -848,34 +864,44 @@ class _MarqueeState extends State<_Marquee>
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (_, cons) {
-      final tp = TextPainter(
-        text: TextSpan(text: widget.text, style: widget.style),
-        maxLines: 1,
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final overflow = tp.width - cons.maxWidth;
+      if (_measuredText != widget.text) {
+        _measuredText = widget.text;
+        _textW = (TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          maxLines: 1,
+          textDirection: TextDirection.ltr,
+        )..layout())
+            .width;
+      }
+      final overflow = _textW! - cons.maxWidth;
       if (overflow <= 0) {
+        // The ticker must be dead when nothing scrolls — a repeating
+        // controller keeps the whole app pumping frames forever.
+        if (_c.isAnimating) _c.stop();
         return Text(widget.text,
             maxLines: 1, overflow: TextOverflow.ellipsis, style: widget.style);
       }
-      return ClipRect(
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, _) {
-            // Hold 25% at each end, scroll across the middle 50%.
-            final p = ((_c.value - 0.25) / 0.5).clamp(0.0, 1.0);
-            return Transform.translate(
-              offset: Offset(-overflow * p, 0),
-              child: SizedBox(
-                width: tp.width,
-                child: Text(widget.text,
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.visible,
-                    style: widget.style),
-              ),
-            );
-          },
+      if (!_c.isAnimating) _c.repeat(reverse: true);
+      return RepaintBoundary(
+        child: ClipRect(
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (_, _) {
+              // Hold 25% at each end, scroll across the middle 50%.
+              final p = ((_c.value - 0.25) / 0.5).clamp(0.0, 1.0);
+              return Transform.translate(
+                offset: Offset(-overflow * p, 0),
+                child: SizedBox(
+                  width: _textW,
+                  child: Text(widget.text,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                      style: widget.style),
+                ),
+              );
+            },
+          ),
         ),
       );
     });

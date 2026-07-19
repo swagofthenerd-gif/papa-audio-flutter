@@ -306,7 +306,14 @@ class Innertube {
             authed: auth.signedIn && client.$1 == _androidMusicClient);
         final s = _bestAudio(json, client.$2);
         if (s != null) {
-          _lastGoodPlayerClient = client.$1['clientName'] as String;
+          // Only make FULL-stream clients sticky. IOS anonymous URLs are
+          // PO-token-capped to ~1 MB (~60 s), so if we stuck to IOS every
+          // track would cut out after a minute and VR would never get
+          // re-probed. Leave lastGood unset (or on VR/MUSIC) in that case.
+          final name = client.$1['clientName'] as String;
+          if (name != 'IOS' || auth.signedIn) {
+            _lastGoodPlayerClient = name;
+          }
           return s;
         }
         last = YtException('No direct audio stream', videoId: videoId);

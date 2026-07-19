@@ -250,7 +250,10 @@ class Innertube {
             'racyCheckOk': true,
           }),
         )
-        .timeout(const Duration(seconds: 20));
+        // Short fuse: a hung /player attempt must fail fast so the next
+        // client in the fallback chain gets its turn — track-start latency
+        // is the whole game here.
+        .timeout(const Duration(seconds: 8));
     if (resp.statusCode != 200) {
       throw YtException('YT player ${resp.statusCode}', videoId: videoId);
     }
@@ -265,11 +268,16 @@ class Innertube {
     return json;
   }
 
+  // The client that resolved the previous track. Leading with it skips the
+  // failed round-trips that made every track-start pay for dead clients
+  // (e.g. a bot-gated ANDROID_VR adding a full request before each song).
+  static String? _lastGoodPlayerClient;
+
   /// Resolve a direct audio stream. Signed in, ANDROID_MUSIC leads (best
   /// quality); anonymous, it always answers LOGIN_REQUIRED so lead with the
   /// clients that resolve without an account.
   Future<YtStream> playerStream(String videoId) async {
-    final clients = auth.signedIn
+    var clients = auth.signedIn
         ? [
             (_androidMusicClient, androidMusicUserAgent, _base),
             (_androidVrClient, androidVrUserAgent, _wwwBase),
@@ -283,6 +291,13 @@ class Innertube {
             (_androidVrClient, androidVrUserAgent, _wwwBase),
             (_iosClient, iosUserAgent, _wwwBase),
           ];
+    final lastGood = _lastGoodPlayerClient;
+    if (lastGood != null) {
+      clients = [
+        ...clients.where((c) => c.$1['clientName'] == lastGood),
+        ...clients.where((c) => c.$1['clientName'] != lastGood),
+      ];
+    }
     YtException? last;
     for (final client in clients) {
       try {
@@ -290,7 +305,10 @@ class Innertube {
             base: client.$3,
             authed: auth.signedIn && client.$1 == _androidMusicClient);
         final s = _bestAudio(json, client.$2);
-        if (s != null) return s;
+        if (s != null) {
+          _lastGoodPlayerClient = client.$1['clientName'] as String;
+          return s;
+        }
         last = YtException('No direct audio stream', videoId: videoId);
       } on YtException catch (e) {
         debugPrint(

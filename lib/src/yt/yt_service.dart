@@ -211,8 +211,13 @@ class YtLazyAudioSource extends StreamAudioSource {
 
   // googlevideo rejects unranged and over-large range requests on some client
   // URLs (403 above ~1–2 MB observed on IOS-minted URLs), so everything is
-  // fetched as sequential bounded chunks and stitched into one stream.
+  // fetched as bounded chunks and stitched into one stream.
   static const chunkBytes = 1024 * 1024;
+
+  // The very first chunk is deliberately small: the player can parse headers
+  // and start audio after ~a quarter MB, so track-start latency is dominated
+  // by resolution, not by downloading a full megabyte first.
+  static const firstChunkBytes = 256 * 1024;
 
   @override
   Future<StreamAudioResponse> request([int? start, int? end]) async {
@@ -222,7 +227,8 @@ class YtLazyAudioSource extends StreamAudioSource {
     // not mid-stream) and its content-range reveals the total length. Ranges
     // must never run past EOF — googlevideo rejects out-of-bounds requests —
     // so cap by every length we know.
-    final first = await _fetchChunk(s, from, end ?? s.contentLength);
+    final first =
+        await _fetchChunk(s, from, end ?? s.contentLength, firstChunkBytes);
     final total = s.contentLength ?? first.total;
     final endExcl = end ?? total;
     return StreamAudioResponse(
@@ -234,8 +240,9 @@ class YtLazyAudioSource extends StreamAudioSource {
     );
   }
 
-  Future<_Chunk> _fetchChunk(YtStream s, int from, int? endExcl) async {
-    var to = from + chunkBytes; // exclusive
+  Future<_Chunk> _fetchChunk(YtStream s, int from, int? endExcl,
+      [int size = chunkBytes]) async {
+    var to = from + size; // exclusive
     if (endExcl != null && endExcl < to) to = endExcl;
     final req = http.Request('GET', Uri.parse(s.url));
     req.headers['user-agent'] = s.userAgent;
@@ -257,18 +264,33 @@ class YtLazyAudioSource extends StreamAudioSource {
   Stream<List<int>> _chunks(
       YtStream s, _Chunk first, int from, int? endExcl) async* {
     var chunk = first;
-    var pos = from;
-    while (true) {
-      yield* chunk.body;
-      pos = chunk.nextFrom;
-      final limit = endExcl ?? chunk.total ?? s.contentLength;
-      if (limit != null && pos >= limit) return;
-      try {
-        chunk = await _fetchChunk(s, pos, limit);
-      } catch (e) {
-        debugPrint('[yt] chunk $videoId @$pos/$limit failed: $e');
-        rethrow;
+    Future<_Chunk>? pending;
+    try {
+      while (true) {
+        final pos = chunk.nextFrom;
+        final limit = endExcl ?? chunk.total ?? s.contentLength;
+        // Pipeline: start fetching the NEXT chunk while the current one is
+        // still streaming into the player, so the network never sits idle
+        // between chunks (this was a visible stall every megabyte).
+        pending = (limit == null || pos < limit)
+            ? _fetchChunk(s, pos, limit)
+            : null;
+        yield* chunk.body;
+        if (pending == null) return;
+        try {
+          chunk = await pending;
+          pending = null;
+        } catch (e) {
+          debugPrint('[yt] chunk $videoId @$pos/$limit failed: $e');
+          rethrow;
+        }
       }
+    } finally {
+      // Generator cancelled (skip/seek) with a fetch in flight — drain it so
+      // the socket is released instead of idling until timeout.
+      pending
+          ?.then((c) => c.body.listen((_) {}).cancel())
+          .catchError((_) {});
     }
   }
 }

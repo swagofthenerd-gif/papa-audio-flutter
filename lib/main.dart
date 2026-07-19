@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemNavigator;
+import 'package:flutter/services.dart' show HapticFeedback, SystemNavigator;
 import 'package:provider/provider.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -272,6 +272,7 @@ class _ShellState extends State<Shell> {
                 backgroundColor: PA.surface,
                 selectedIndex: tab,
                 onDestinationSelected: (i) {
+                  HapticFeedback.selectionClick();
                   // Tab tap clears any pushed screen so the tab itself shows.
                   Shell.contentNav.currentState?.popUntil((r) => r.isFirst);
                   _tab.value = i;

@@ -82,6 +82,20 @@ class _PlayerSheetState extends State<PlayerSheet>
   Color? _artColor; // dominant artwork color for the expanded background
   String? _artColorKey;
 
+  // Animated color cross-fade on track change: _artColorShown chases
+  // _artColor so the background glides between palettes instead of snapping.
+  Color? _artColorShown;
+  late final AnimationController _colorC = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 450));
+  ColorTween? _colorTween;
+
+  void _animateArtColor(Color? to) {
+    _colorTween = ColorTween(begin: _artColorShown, end: to);
+    _colorC
+      ..reset()
+      ..forward();
+  }
+
   /// Toggle the video overlay for the current YouTube track. Pauses audio and
   /// hands off to the video engine; toggling off resumes audio at the video's
   /// position.
@@ -138,6 +152,7 @@ class _PlayerSheetState extends State<PlayerSheet>
     videoOn.dispose();
     _c.dispose();
     _q.dispose();
+    _colorC.dispose();
     super.dispose();
   }
 
@@ -156,11 +171,15 @@ class _PlayerSheetState extends State<PlayerSheet>
     final s = context.read<AppState>();
     if (!s.settings.dynamicColors) {
       _artColor = null;
+      _animateArtColor(null);
       return;
     }
     s.artColors.forTrack(track).then((c) {
       if (mounted && _artColorKey == track.key) {
-        setState(() => _artColor = c);
+        setState(() {
+          _artColor = c;
+          _animateArtColor(c);
+        });
       }
     });
   }
@@ -184,10 +203,12 @@ class _PlayerSheetState extends State<PlayerSheet>
       final fling = -d.velocity.pixelsPerSecond.dy / qTravel;
       final target =
           fling.abs() > 0.7 ? (fling > 0 ? 1.0 : 0.0) : (_q.value > 0.5 ? 1.0 : 0.0);
+      HapticFeedback.selectionClick();
       _spring(_q, target, fling);
       return;
     }
     final fling = -d.velocity.pixelsPerSecond.dy / travel;
+    HapticFeedback.selectionClick(); // snap tick, Namida-style
     if (fling.abs() > 0.7) {
       _spring(_c, fling > 0 ? 1.0 : 0.0, fling);
     } else {
@@ -242,6 +263,7 @@ class _PlayerSheetState extends State<PlayerSheet>
           track: track,
           side: fullSide,
           lyricsOn: lyricsOn,
+          glow: _artColor,
         );
         // Pseudo-blur backdrop: a tiny decode stretched full-screen; bilinear
         // upscaling reads as a blur at near-zero cost (no ImageFiltered).
@@ -283,8 +305,9 @@ class _PlayerSheetState extends State<PlayerSheet>
             (size.width - fullSide) / 2, topInset + 56, fullSide, fullSide);
 
         return AnimatedBuilder(
-          animation: Listenable.merge([_c, _q]),
+          animation: Listenable.merge([_c, _q, _colorC]),
           builder: (context, _) {
+              _artColorShown = _colorTween?.evaluate(_colorC) ?? _artColor;
               final top = collapsedTop * (1 - t);
               // Collapsed, the sheet is ONLY the mini strip (the nav bar stays
               // visible and tappable below it); expanded it fills the screen.
@@ -309,15 +332,33 @@ class _PlayerSheetState extends State<PlayerSheet>
                           _onVDragEnd(d, travel, qHeight),
                       child: Container(
                         decoration: BoxDecoration(
-                          // Expanded background tints toward the artwork's
-                          // dominant color (subtle — Spotify-dark stays boss).
-                          color: Color.lerp(
-                              PA.surfaceElevated,
-                              _artColor != null
-                                  ? Color.lerp(
-                                      PA.background, _artColor, 0.38)!
-                                  : PA.background,
-                              t),
+                          // Expanded background: top-weighted gradient from
+                          // the artwork's dominant color fading into the app
+                          // background — Namida/Spotify style. The color
+                          // itself cross-fades on track change (_colorC).
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            stops: const [0.0, 0.55, 1.0],
+                            colors: [
+                              Color.lerp(
+                                  PA.surfaceElevated,
+                                  _artColorShown != null
+                                      ? Color.lerp(PA.background,
+                                          _artColorShown, 0.55)!
+                                      : PA.background,
+                                  t)!,
+                              Color.lerp(
+                                  PA.surfaceElevated,
+                                  _artColorShown != null
+                                      ? Color.lerp(PA.background,
+                                          _artColorShown, 0.22)!
+                                      : PA.background,
+                                  t)!,
+                              Color.lerp(
+                                  PA.surfaceElevated, PA.background, t)!,
+                            ],
+                          ),
                           borderRadius: BorderRadius.vertical(
                               top: Radius.circular(
                                   12 * (1 - t) + 16 * t * (1 - t))),
@@ -381,11 +422,29 @@ class _PlayerSheetState extends State<PlayerSheet>
                                   if (t >= 0.999) return carousel;
                                   return child!;
                                 },
-                                child: ClipRRect(
-                                  borderRadius:
-                                      BorderRadius.circular(4 + 6 * t),
-                                  child: FittedBox(
-                                      fit: BoxFit.fill, child: art),
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius:
+                                        BorderRadius.circular(4 + 6 * t),
+                                    boxShadow: [
+                                      // Soft colored glow under the art,
+                                      // grows in with expansion.
+                                      if (t > 0.3 && _artColorShown != null)
+                                        BoxShadow(
+                                          color: _artColorShown!
+                                              .withValues(alpha: 0.45 * t),
+                                          blurRadius: 32 * t,
+                                          spreadRadius: 2 * t,
+                                          offset: Offset(0, 10 * t),
+                                        ),
+                                    ],
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius:
+                                        BorderRadius.circular(4 + 6 * t),
+                                    child: FittedBox(
+                                        fit: BoxFit.fill, child: art),
+                                  ),
                                 ),
                               ),
                             ),
@@ -475,6 +534,7 @@ class _MiniBarState extends State<_MiniBar> {
     final commit = drag.abs() > width / 3 || v.abs() > 700;
     if (mounted) setState(() => _hDrag = 0);
     if (commit) {
+      HapticFeedback.selectionClick();
       final forward = drag < 0 || v < -700;
       forward ? await widget.ps.next() : await widget.ps.previousSmart();
     }
@@ -612,11 +672,13 @@ class _ArtCarousel extends StatefulWidget {
   final Track track;
   final double side;
   final ValueNotifier<bool> lyricsOn;
+  final Color? glow; // dominant art color for the soft shadow
   const _ArtCarousel(
       {required this.ps,
       required this.track,
       required this.side,
-      required this.lyricsOn});
+      required this.lyricsOn,
+      this.glow});
 
   @override
   State<_ArtCarousel> createState() => _ArtCarouselState();
@@ -695,8 +757,9 @@ class _ArtCarouselState extends State<_ArtCarousel>
 
     Widget slot(Track? tr, double off) {
       final x = off + _drag;
+      final centered = (1 - (x.abs() / (side + _gap))).clamp(0.0, 1.0);
       // Cards shrink slightly as they leave center — cheap depth cue.
-      final scale = 1 - 0.08 * (x.abs() / (side + _gap)).clamp(0.0, 1.0);
+      final scale = 1 - 0.08 * (1 - centered);
       return Positioned(
         left: x,
         top: 0,
@@ -707,14 +770,29 @@ class _ArtCarouselState extends State<_ArtCarousel>
           child: tr == null
               ? const SizedBox.shrink()
               : RepaintBoundary(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: TrackArt(
-                      artUri: tr.artUri,
-                      artPath: tr.artPath,
-                      size: side,
-                      radius: 0,
-                      px: 800,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: [
+                        if (widget.glow != null && centered > 0.2)
+                          BoxShadow(
+                            color: widget.glow!
+                                .withValues(alpha: 0.45 * centered),
+                            blurRadius: 32,
+                            spreadRadius: 2,
+                            offset: const Offset(0, 10),
+                          ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: TrackArt(
+                        artUri: tr.artUri,
+                        artPath: tr.artPath,
+                        size: side,
+                        radius: 0,
+                        px: 800,
+                      ),
                     ),
                   ),
                 ),
@@ -1209,6 +1287,7 @@ class SeekBar extends StatefulWidget {
 
 class _SeekBarState extends State<SeekBar> {
   double? _dragValue; // seconds; non-null while the thumb is being dragged
+  bool _remaining = false; // right label shows -remaining instead of total
   List<double>? _bars;
   String? _barsKey;
 
@@ -1302,9 +1381,18 @@ class _SeekBarState extends State<SeekBar> {
                         Text(fmtDuration(value / 1000),
                             style: const TextStyle(
                                 fontSize: 11, color: PA.textMuted)),
-                        Text(fmtDuration(total / 1000),
-                            style: const TextStyle(
-                                fontSize: 11, color: PA.textMuted)),
+                        // Tap the right label to flip total ⇄ remaining.
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () =>
+                              setState(() => _remaining = !_remaining),
+                          child: Text(
+                              _remaining
+                                  ? '-${fmtDuration((total - value) / 1000)}'
+                                  : fmtDuration(total / 1000),
+                              style: const TextStyle(
+                                  fontSize: 11, color: PA.textMuted)),
+                        ),
                       ],
                     ),
                   ),
@@ -1473,6 +1561,8 @@ class _TransportControlsState extends State<TransportControls> {
                 child: Container(
                   width: 68,
                   height: 68,
+                  // Without this the glyph paints at the circle's top-left.
+                  alignment: Alignment.center,
                   decoration: const BoxDecoration(
                       color: Colors.white, shape: BoxShape.circle),
                   child: buffering
@@ -1636,6 +1726,7 @@ class _QueuePanelState extends State<QueuePanel> {
                     itemCount: queue.length,
                     onReorder: (from, to) {
                       if (to > from) to -= 1; // ReorderableListView index convention
+                      HapticFeedback.lightImpact();
                       ps.moveInQueue(from, to);
                     },
                     itemBuilder: (_, i) {

@@ -462,7 +462,8 @@ class Innertube {
     if (title == null || title.isEmpty) return null;
     final subtitle = _text(r['subtitle']) ?? '';
     final thumb = _thumb(_dig(r,
-        ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']));
+            ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])) ??
+        _thumbDeep(r['thumbnailRenderer']);
     final nav = r['navigationEndpoint'];
     return _fromEndpoint(nav, title: title, subtitle: subtitle, thumb: thumb);
   }
@@ -482,7 +483,8 @@ class Innertube {
         if ((colText(i) ?? '').isNotEmpty) colText(i)!
     ].join(' · ');
     final thumb = _thumb(_dig(r,
-        ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']));
+            ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])) ??
+        _thumbDeep(r['thumbnail']);
 
     // videoId lives either on the title run, the overlay play button, or the
     // row's own playlistItemData.
@@ -633,6 +635,26 @@ class Innertube {
     if (thumbs is! List || thumbs.isEmpty) return null;
     final last = thumbs.last;
     return last is Map ? last['url']?.toString() : null;
+  }
+
+  /// Fallback thumbnail extraction: find the first `thumbnails` list anywhere
+  /// under [node]. Covers renderer variants (croppedSquareThumbnailRenderer
+  /// and friends) whose nesting differs from the classic path.
+  static String? _thumbDeep(dynamic node, [int depth = 0]) {
+    if (depth > 8) return null;
+    if (node is Map) {
+      if (node['thumbnails'] is List) return _thumb(node['thumbnails']);
+      for (final v in node.values) {
+        final r = _thumbDeep(v, depth + 1);
+        if (r != null) return r;
+      }
+    } else if (node is List) {
+      for (final v in node) {
+        final r = _thumbDeep(v, depth + 1);
+        if (r != null) return r;
+      }
+    }
+    return null;
   }
 
   /// First continuation token anywhere in the response (YT nests it under

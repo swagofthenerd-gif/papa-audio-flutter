@@ -43,7 +43,10 @@ class YtMusicItem {
       album: null,
       filePath: '',
       duration: (durationSec ?? 0).toDouble(),
-      artUri: thumbnail,
+      // Some surfaces (album pages, certain A/B layouts) omit per-track
+      // thumbnails; every video has a ytimg still, so no YT track is ever
+      // art-less in the player.
+      artUri: thumbnail ?? 'https://i.ytimg.com/vi/$id/hqdefault.jpg',
     );
   }
 }

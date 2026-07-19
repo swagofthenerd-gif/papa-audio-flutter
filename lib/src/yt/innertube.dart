@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show compute, debugPrint;
+import 'package:flutter/foundation.dart' show compute, debugPrint, kDebugMode;
 import 'package:http/http.dart' as http;
 
 import 'yt_auth.dart';
@@ -368,6 +368,8 @@ class Innertube {
   /// Walk the whole response and collect every shelf-like renderer.
   static List<YtShelf> parseShelves(Map<String, dynamic> root) {
     final shelves = <YtShelf>[];
+    // Diagnosis aid: shelf-shaped renderers the switch below doesn't handle.
+    final skipped = <String>{};
     _walk(root, (key, node) {
       switch (key) {
         case 'musicCarouselShelfRenderer':
@@ -405,8 +407,32 @@ class Innertube {
           ];
           final items = _items(direct);
           if (items.isNotEmpty) shelves.add(YtShelf(title: '', items: items));
+        // Signed-in home: hero carousel at the top, same item shape as the
+        // basic carousel but a different header renderer.
+        case 'musicImmersiveCarouselShelfRenderer':
+          final title = _text(_dig(node, [
+                'header',
+                'musicImmersiveCarouselShelfBasicHeaderRenderer',
+                'title'
+              ])) ??
+              _text(_findFirstMap(node['header'], 'title')) ??
+              '';
+          final items = _items(node['contents']);
+          if (items.isNotEmpty) shelves.add(YtShelf(title: title, items: items));
+        case 'musicTastebuilderShelfRenderer':
+          break; // "pick your artists" promo — deliberately not a shelf
+        default:
+          if (kDebugMode &&
+              key.endsWith('Renderer') &&
+              (node['contents'] is List || node['items'] is List)) {
+            skipped.add(key);
+          }
       }
     });
+    if (kDebugMode && skipped.isNotEmpty) {
+      debugPrint('[yt] parseShelves: ${shelves.length} shelves; '
+          'skipped renderers: ${skipped.join(', ')}');
+    }
     return shelves;
   }
 
@@ -548,6 +574,25 @@ class Innertube {
       }
     }
     return cur;
+  }
+
+  /// First Map stored under [key] anywhere under [node] (e.g. a `title`
+  /// text object inside an unknown header renderer).
+  static Map? _findFirstMap(dynamic node, String key, [int depth = 0]) {
+    if (depth > 20) return null;
+    if (node is Map) {
+      if (node[key] is Map) return node[key] as Map;
+      for (final v in node.values) {
+        final r = _findFirstMap(v, key, depth + 1);
+        if (r != null) return r;
+      }
+    } else if (node is List) {
+      for (final v in node) {
+        final r = _findFirstMap(v, key, depth + 1);
+        if (r != null) return r;
+      }
+    }
+    return null;
   }
 
   /// First value for [key] anywhere under [node].

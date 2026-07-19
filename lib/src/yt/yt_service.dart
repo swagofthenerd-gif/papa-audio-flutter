@@ -32,18 +32,24 @@ class YtService extends ChangeNotifier {
   Future<void> init(AppDatabase db) async {
     _db = db;
     // Warm start: paint last session's feed instantly, refresh behind it.
+    // A cache written under a different auth state is someone else's feed —
+    // never paint it (that's the "stale anonymous home after sign-in" bug).
     try {
       final raw = await db.getKv(_homeCacheKey);
       if (raw != null && raw.isNotEmpty) {
         final json = jsonDecode(raw) as Map<String, dynamic>;
-        homeShelves = _shelvesFromJson(json['shelves']);
-        revision++;
-        notifyListeners();
-        final at = DateTime.fromMillisecondsSinceEpoch(json['at'] as int? ?? 0);
-        if (DateTime.now().difference(at) < _homeCacheTtl) return;
+        final cachedSignedIn = json['signedIn'] == true;
+        if (cachedSignedIn == auth.signedIn) {
+          homeShelves = _shelvesFromJson(json['shelves']);
+          revision++;
+          notifyListeners();
+          final at =
+              DateTime.fromMillisecondsSinceEpoch(json['at'] as int? ?? 0);
+          if (DateTime.now().difference(at) < _homeCacheTtl) return;
+        }
       }
     } catch (_) {}
-    if (auth.signedIn) refreshHome();
+    refreshHome();
   }
 
   /// Fetch the (personalized) home feed. Coalesces concurrent calls.
@@ -54,6 +60,8 @@ class YtService extends ChangeNotifier {
     notifyListeners();
     try {
       final shelves = await tube.home();
+      debugPrint('[yt] home refresh: signedIn=${auth.signedIn} '
+          'parsed=${shelves.length} shelves');
       if (shelves.isNotEmpty) {
         homeShelves = shelves;
         revision++;
@@ -61,10 +69,16 @@ class YtService extends ChangeNotifier {
             _homeCacheKey,
             jsonEncode({
               'at': DateTime.now().millisecondsSinceEpoch,
+              'signedIn': auth.signedIn,
               'shelves': _shelvesToJson(shelves),
             }));
+      } else if (homeShelves.isEmpty) {
+        // Response parsed to nothing and there's no feed on screen — surface
+        // it instead of leaving a silent blank (never overwrite a good feed).
+        homeError = 'Feed returned no recognizable content';
       }
     } catch (e) {
+      debugPrint('[yt] home refresh failed: $e');
       homeError = e.toString();
     } finally {
       homeLoading = false;
@@ -72,15 +86,15 @@ class YtService extends ChangeNotifier {
     }
   }
 
-  /// Called after login/logout: drop personalized state and refetch.
+  /// Called after login/logout: invalidate the cache and refetch. The old
+  /// shelves stay on screen under a loading state until the new feed lands —
+  /// clearing them first caused a blank flash.
   Future<void> onAuthChanged() async {
-    homeShelves = const [];
-    revision++;
     try {
       await _db?.setKv(_homeCacheKey, '');
     } catch (_) {}
-    notifyListeners();
-    if (auth.signedIn) await refreshHome();
+    homeLoading = false; // let refreshHome() through even if one is in flight
+    await refreshHome(); // anonymous home also returns shelves on sign-out
   }
 
   // ── Shelf (de)serialization for the warm-start cache ──────────────────────

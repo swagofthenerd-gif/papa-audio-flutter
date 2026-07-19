@@ -123,6 +123,15 @@ class _HomeTabState extends State<HomeTab> {
               if (showReco)
                 for (final shelf in s.yt.homeShelves.take(8))
                   SliverToBoxAdapter(child: YtShelfRow(shelf: shelf)),
+              // Feed is refreshing and there's nothing to show yet — skeleton
+              // instead of a blank gap (post-login refetch lands here).
+              if (showReco && s.yt.homeLoading && s.yt.homeShelves.isEmpty)
+                const _SkeletonShelves(),
+              if (showReco &&
+                  !s.yt.homeLoading &&
+                  s.yt.homeError != null &&
+                  s.yt.homeShelves.isEmpty)
+                SliverToBoxAdapter(child: _YtFeedError(state: s)),
 
               if (showLocal && recent.isNotEmpty)
                 _Shelf(
@@ -1001,6 +1010,32 @@ class _SkeletonShelves extends StatelessWidget {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// YT feed failed and nothing is on screen — inline error with retry.
+class _YtFeedError extends StatelessWidget {
+  final AppState state;
+  const _YtFeedError({required this.state});
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: PA.textSecondary, size: 20),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text('Couldn’t load your YouTube Music feed',
+                style: TextStyle(color: PA.textSecondary, fontSize: 13)),
+          ),
+          TextButton(
+            onPressed: () => state.yt.refreshHome(),
+            child: const Text('Retry'),
+          ),
         ],
       ),
     );

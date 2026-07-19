@@ -175,6 +175,27 @@ class Innertube {
     return wanted.first;
   }
 
+  /// Similar artists to explore ("Fans might also like") for a given artist
+  /// name — powers discovery on artist and album pages. Resolves the artist's
+  /// channel, then pulls the related-artists shelf from their page.
+  Future<List<YtMusicItem>> relatedArtists(String name) async {
+    final artist = await findArtist(name);
+    if (artist?.browseId == null) return const [];
+    final shelves = await browsePage(artist!.browseId!);
+    final out = <YtMusicItem>[];
+    final seen = <String>{artist.browseId!};
+    for (final s in shelves) {
+      for (final it in s.items) {
+        if ((it.kind == YtItemKind.artist || it.kind == YtItemKind.channel) &&
+            it.browseId != null &&
+            seen.add(it.browseId!)) {
+          out.add(it);
+        }
+      }
+    }
+    return out;
+  }
+
   /// Radio/related queue for a video — powers "keep playing similar".
   Future<List<YtMusicItem>> related(String videoId) async {
     final shelves = parseShelves(await nextRaw(videoId));

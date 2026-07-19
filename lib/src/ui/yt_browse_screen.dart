@@ -100,6 +100,7 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
 
   List<Track> _tracks = const []; // memoized once at load
   List<YtMusicItem> _relatedAlbums = const []; // "More from artist" (albums)
+  List<YtMusicItem> _similarArtists = const []; // "Fans might also like"
   String _relatedArtist = '';
 
   Future<void> _load() async {
@@ -125,6 +126,7 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
         final artist = _tracks.first.artist;
         if (artist.isNotEmpty && artist != 'YouTube') {
           _loadRelatedAlbums(tube, item, artist);
+          _loadSimilarArtists(tube, artist);
         }
       }
     } catch (e) {
@@ -159,6 +161,17 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
       }
     } catch (_) {
       // best-effort — no related shelf on failure
+    }
+  }
+
+  Future<void> _loadSimilarArtists(dynamic tube, String artist) async {
+    try {
+      final artists = await tube.relatedArtists(artist) as List<YtMusicItem>;
+      if (mounted && artists.isNotEmpty) {
+        setState(() => _similarArtists = artists.take(20).toList());
+      }
+    } catch (_) {
+      // best-effort
     }
   }
 
@@ -233,6 +246,13 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
                             shelf: YtShelf(
                                 title: 'More from $_relatedArtist',
                                 items: _relatedAlbums)),
+                      ),
+                    if (_similarArtists.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: YtShelfRow(
+                            shelf: YtShelf(
+                                title: 'Fans might also like',
+                                items: _similarArtists)),
                       ),
                     const SliverToBoxAdapter(child: SizedBox(height: 24)),
                   ],

@@ -769,16 +769,9 @@ class _ArtCarouselState extends State<_ArtCarousel>
       final centered = (1 - (x.abs() / (side + _gap))).clamp(0.0, 1.0);
       // Cards shrink slightly as they leave center — cheap depth cue.
       final scale = 1 - 0.08 * (1 - centered);
-      return Positioned(
-        left: x,
-        top: 0,
-        width: side,
-        height: side,
-        child: Transform.scale(
-          scale: scale,
-          child: tr == null
-              ? const SizedBox.shrink()
-              : DecoratedBox(
+      Widget card = tr == null
+          ? const SizedBox.shrink()
+          : DecoratedBox(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
                     boxShadow: [
@@ -807,8 +800,17 @@ class _ArtCarouselState extends State<_ArtCarousel>
                       ),
                     ),
                   ),
-                ),
-        ),
+                );
+      // The centered card breathes with the waveform (local tracks).
+      if (off == 0 && tr != null) {
+        card = _PulseArt(ps: widget.ps, track: tr, child: card);
+      }
+      return Positioned(
+        left: x,
+        top: 0,
+        width: side,
+        height: side,
+        child: Transform.scale(scale: scale, child: card),
       );
     }
 
@@ -831,6 +833,74 @@ class _ArtCarouselState extends State<_ArtCarousel>
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Namida-style beat pulse: scales its child with the track's waveform
+/// amplitude at the playhead. Local tracks only (waveform data source);
+/// transparent pass-through otherwise. The position stream ticks a few times
+/// a second and AnimatedScale glides between amplitudes.
+class _PulseArt extends StatefulWidget {
+  final PlayerService ps;
+  final Track track;
+  final Widget child;
+  const _PulseArt(
+      {required this.ps, required this.track, required this.child});
+  @override
+  State<_PulseArt> createState() => _PulseArtState();
+}
+
+class _PulseArtState extends State<_PulseArt> {
+  List<double>? _bars;
+  String? _key;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PulseArt old) {
+    super.didUpdateWidget(old);
+    if (old.track.key != widget.track.key) _load();
+  }
+
+  void _load() {
+    final t = widget.track;
+    if (_key == t.key) return;
+    _key = t.key;
+    _bars = null;
+    if (!WaveformService.eligible(t)) return;
+    context.read<AppState>().waveforms?.forTrack(t).then((bars) {
+      if (mounted && _key == t.key) setState(() => _bars = bars);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bars = _bars;
+    if (bars == null || bars.isEmpty) return widget.child;
+    return StreamBuilder<Duration>(
+      stream: widget.ps.position,
+      builder: (_, snap) {
+        var amp = 0.0;
+        final dur = widget.ps.player.duration?.inMilliseconds ?? 0;
+        final pos = snap.data?.inMilliseconds ?? 0;
+        if (dur > 0) {
+          final i = (pos / dur * bars.length)
+              .floor()
+              .clamp(0, bars.length - 1);
+          amp = bars[i].clamp(0.0, 1.0);
+        }
+        return AnimatedScale(
+          scale: 1 + 0.045 * amp,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOut,
+          child: widget.child,
+        );
+      },
     );
   }
 }

@@ -796,14 +796,10 @@ class _GenresViewState extends State<_GenresView> {
         final name = names[i];
         final tracks = byGenre[name]!;
         return ListTile(
-          leading: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: PA.card,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: const Icon(Icons.piano, color: PA.textSecondary, size: 22),
+          // Collage of the genre's album arts, Namida-style.
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: MosaicArt(tracks: tracks, size: 44),
           ),
           title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text('${tracks.length} tracks',

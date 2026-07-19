@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../local_library.dart';
+import '../models.dart';
 import '../theme.dart';
 
 /// One artwork widget for every source the app plays from:
@@ -179,4 +180,43 @@ String fmtDuration(double seconds) {
   String two(int n) => n.toString().padLeft(2, '0');
   if (d.inHours > 0) return '${d.inHours}:${two(d.inMinutes % 60)}:${two(d.inSeconds % 60)}';
   return '${d.inMinutes}:${two(d.inSeconds % 60)}';
+}
+
+/// 2×2 collage of distinct album arts from [tracks] (single art when fewer
+/// than four albums). Used for playlist/queue/genre cards.
+class MosaicArt extends StatelessWidget {
+  final List<Track> tracks;
+  final double size;
+  const MosaicArt({super.key, required this.tracks, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    // First track per distinct album, up to 4.
+    final reps = <Track>[];
+    final seen = <String>{};
+    for (final t in tracks) {
+      final k = t.album ?? t.artUri ?? t.artPath ?? t.key;
+      if (seen.add(k)) reps.add(t);
+      if (reps.length == 4) break;
+    }
+    if (reps.isEmpty) {
+      return SizedBox(width: size, height: size, child: const ArtPlaceholder());
+    }
+    if (reps.length < 4) {
+      final t = reps.first;
+      return TrackArt(
+          artUri: t.artUri, artPath: t.artPath, size: size, radius: 0, px: 300);
+    }
+    final half = size / 2;
+    Widget cell(Track t) => TrackArt(
+        artUri: t.artUri, artPath: t.artPath, size: half, radius: 0, px: 150);
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Column(children: [
+        Row(children: [cell(reps[0]), cell(reps[1])]),
+        Row(children: [cell(reps[2]), cell(reps[3])]),
+      ]),
+    );
+  }
 }

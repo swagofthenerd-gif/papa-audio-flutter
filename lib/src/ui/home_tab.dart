@@ -823,43 +823,6 @@ class _PcAlbumRow extends StatelessWidget {
 
 /// 2×2 mosaic of the first four distinct album arts (Spotify's playlist-cover
 /// pattern). Falls back to a single art below four distinct covers.
-class _MosaicArt extends StatelessWidget {
-  final List<Track> tracks;
-  final double size;
-  const _MosaicArt({required this.tracks, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    // First track per distinct album, up to 4.
-    final reps = <Track>[];
-    final seen = <String>{};
-    for (final t in tracks) {
-      final k = t.album ?? t.artUri ?? t.artPath ?? t.key;
-      if (seen.add(k)) reps.add(t);
-      if (reps.length == 4) break;
-    }
-    if (reps.isEmpty) {
-      return SizedBox(width: size, height: size, child: const ArtPlaceholder());
-    }
-    if (reps.length < 4) {
-      final t = reps.first;
-      return TrackArt(
-          artUri: t.artUri, artPath: t.artPath, size: size, radius: 0, px: 300);
-    }
-    final half = size / 2;
-    Widget cell(Track t) => TrackArt(
-        artUri: t.artUri, artPath: t.artPath, size: half, radius: 0, px: 150);
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Column(children: [
-        Row(children: [cell(reps[0]), cell(reps[1])]),
-        Row(children: [cell(reps[2]), cell(reps[3])]),
-      ]),
-    );
-  }
-}
-
 class _PlaylistRow extends StatelessWidget {
   final List<Playlist> playlists;
   const _PlaylistRow({required this.playlists});
@@ -868,7 +831,7 @@ class _PlaylistRow extends StatelessWidget {
     return _Row(children: [
       for (final p in playlists)
         _Card(
-          art: _MosaicArt(tracks: p.tracks, size: 138),
+          art: MosaicArt(tracks: p.tracks, size: 138),
           title: p.name,
           subtitle: '${p.tracks.length} tracks',
           onTap: () => Navigator.push(context,
@@ -890,7 +853,7 @@ class _QueueRow extends StatelessWidget {
     return _Row(children: [
       for (final q in queues)
         _Card(
-          art: _MosaicArt(tracks: q.tracks, size: 138),
+          art: MosaicArt(tracks: q.tracks, size: 138),
           // Content first (a real track), count secondary — a timestamp gives
           // each queue card a distinct identity.
           title: q.tracks.first.title,

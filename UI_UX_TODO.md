@@ -10,7 +10,7 @@ feel-per-effort within each section. Verify each on the emulator.
 ---
 
 ## 1. Quick wins — highest feel-per-effort, do first
-- [ ] **[S] Haptics everywhere** — light tick on long-press select, swipe-commit, drag-reorder, tab switch, snap of the player sheet. (PARTIAL: home cards/chips + favorite toggle done; still need swipe-commit, reorder, tab switch, sheet snap.)
+- [ ] **[S] Haptics everywhere** — light tick on long-press select, swipe-commit, drag-reorder, tab switch, snap of the player sheet. (PARTIAL: home cards/chips, favorite, swipe-commit, reorder, tab switch, sheet snap done 2026-07-19; long-press select pending.)
 - [ ] **[S] Press-scale on cards** — `AnimatedScale` to ~0.96 on tap-down for shelf/album/track cards (Apple/Namida tactile feel).
 - [x] **[S] Like-button burst** — heart scale-bounce + haptic on favorite toggle (player). TODO: extend to track-tile hearts.
 - [x] **[S] AnimatedIcon play/pause** — player main button + expanded utility row now morph (`AnimatedIcons.play_pause`). TODO: mini-bar bottom strip if it has its own.
@@ -28,18 +28,18 @@ feel-per-effort within each section. Verify each on the emulator.
 - [ ] **[M] Folder tree mode** — real hierarchy with breadcrumb + subfolder counts + flat toggle (currently flat groups only).
 - [ ] **[S] Jump-to-track pill** — animated pill that appears while scrolling a long list, tapping jumps to the now-playing track; icon reflects scroll position (up/down/CD).
 - [ ] **[M] Track-tile layout editor** — configurable rows/fields, sizes, inline heart (Namida lets users design the row).
-- [ ] **[S] Genre collage cards** — 2×2 art mosaic for genre cards (we already have `_MosaicArt` for playlists — reuse).
+- [x] **[S] Genre collage cards** (2026-07-19: shared MosaicArt on genre tiles)
 
 ## 3. Player feel (the expanded player is where Namida shines)
-- [ ] **[M] Queue slide-up layer** — drag *past* the full player to reveal the queue as a third snap state (currently a separate sheet).
+- [x] **[M] Queue slide-up layer** (2026-07-19: drag-up in-player panel)
 - [ ] **[S] Audio-info line** — codec / bitrate / sample-rate readout in the expanded player.
-- [ ] **[S] Seek display options** — remaining-time toggle; show +/- delta bubble while scrubbing the waveform; drag-up-to-cancel seek.
-- [ ] **[M] Beat-reactive artwork pulse** — waveform-driven scale on the art, per-state intensity (Namida's most-loved effect).
+- [~] **[S] Seek display options** (2026-07-19: remaining-time toggle done; delta bubble + drag-to-cancel pending) — remaining-time toggle; show +/- delta bubble while scrubbing the waveform; drag-up-to-cancel seek.
+- [x] **[M] Beat-reactive artwork pulse** (2026-07-19: waveform-amplitude pulse on the carousel card, local tracks)
 - [ ] **[M] Party mode** — beat-synced edge glow around the screen, optional multi-color palette swap.
 - [ ] **[S] Idle dimming** — dim the expanded player after N seconds, touch to wake.
 - [ ] **[S] Immersive mode + wakelock** while the player is expanded.
 - [ ] **[S] Artwork gestures** — configurable tap / long-press / double-tap (double-tap already toggles lyrics — extend), pinch-to-zoom.
-- [ ] **[M] Player background** — top-weighted gradient from the art color (currently a flat lerp) + soft colored shadow under the artwork + animated color cross-fade on track change.
+- [x] **[M] Player background** (2026-07-19: top gradient + art glow + animated cross-fade)
 - [ ] **[S] Swipe-down to dismiss** — optional: stops playback + clears queue with elastic headroom.
 
 ## 4. Navigation, search & interactions

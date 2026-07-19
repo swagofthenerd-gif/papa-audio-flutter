@@ -141,6 +141,35 @@ stylus" system dialog once swallowed taps — dismiss via its Cancel button.
 prefer `am start -n com.shaharyar.papa_audio/.MainActivity` to relaunch
 (monkey sometimes races the shade).
 
+## Session 2026-07-19 (Linux box, commit `d9e0593`)
+
+Three waves shipped on branch `claude/project-changes-review-zgqc3y`:
+
+1. **Home-after-sign-in fix** (`6829e7a`): home cache is now auth-keyed
+   (`signedIn` in the blob — mismatched cache is never painted), sign-in/out
+   no longer blanks the shelves before the refetch, anonymous home is fetched
+   too (previously signed-out users got no YT shelves at all), empty-parse →
+   `homeError` + inline Retry row, refreshing-empty → skeleton. Parser gained
+   `musicImmersiveCarouselShelfRenderer` and logs skipped shelf-shaped
+   renderers (`[yt] parseShelves`) — check logcat on a signed-in device to
+   find any renderer still unhandled (emulator has no cookies).
+2. **Namida-style player rework** (`9375baf`): spring-simulation
+   expand/collapse with velocity carry + parallax; swipeable artwork carousel
+   in the full player (neighbors from new `PlayerService.effectiveNextTrack/
+   effectivePreviousTrack`, shuffle/loop-aware; carousel mounts only at
+   t==1 so the morph stays single-art); drag-up in-player queue panel
+   (`_q` controller; `QueuePanel` extracted, shared with the modal sheet);
+   pseudo-blur backdrop (px:32 art stretched, no ImageFiltered); marquee
+   titles; press-scale transport; seekbar grows while scrubbing.
+3. **Mini player on every screen** (`d9e0593`): nested content `Navigator`
+   (`Shell.contentNav`) — pushed screens slide under the mini bar + nav bar.
+   Overlay-initiated pushes route via `Shell.contentContext(ctx)`
+   (music_hub.openAlbum/openArtist, equalizer). ONE central PopScope in
+   Shell (queue panel → expanded player → nested pop → SystemNavigator.pop);
+   PlayerSheet registers `PlayerSheet.backHandler` and must NOT own its own
+   PopScope (split PopScopes double-fire on one back press). All verified on
+   emulator including the full back chain.
+
 ## Verification recipe per wave
 
 1. `flutter analyze` + `flutter test` (15 tests must stay green).

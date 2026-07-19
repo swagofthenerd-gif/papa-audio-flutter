@@ -389,6 +389,32 @@ class SettingsScreen extends StatelessWidget {
                     const Text('Change', style: TextStyle(color: PA.accent)),
               ),
             ),
+            const _Section('Scrobbling'),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
+              secondary:
+                  const Icon(Icons.graphic_eq, color: PA.textSecondary),
+              title: const Text('ListenBrainz'),
+              subtitle: const Text('Submit your listens to listenbrainz.org',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.scrobbleEnabled,
+              onChanged: (v) => st.update(() => st.scrobbleEnabled = v),
+            ),
+            if (st.scrobbleEnabled)
+              ListTile(
+                leading: const Icon(Icons.key, color: PA.textSecondary),
+                title: const Text('User token'),
+                subtitle: Text(
+                    st.listenBrainzToken.isEmpty
+                        ? 'Tap to paste your token (listenbrainz.org → Settings)'
+                        : 'Token set · tap to change or test',
+                    style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+                trailing: st.listenBrainzToken.isEmpty
+                    ? null
+                    : const Icon(Icons.check_circle,
+                        color: PA.accent, size: 18),
+                onTap: () => _editListenBrainzToken(context, s),
+              ),
             const _Section('About'),
             ListTile(
               leading:
@@ -413,6 +439,85 @@ class SettingsScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+Future<void> _editListenBrainzToken(BuildContext context, AppState s) async {
+  final ctrl = TextEditingController(text: s.settings.listenBrainzToken);
+  final result = await showDialog<String>(
+    context: context,
+    builder: (ctx) {
+      String? status;
+      bool testing = false;
+      return StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          backgroundColor: PA.surfaceElevated,
+          title: const Text('ListenBrainz token', style: TextStyle(fontSize: 17)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'Paste your token from listenbrainz.org → Settings.',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                decoration: const InputDecoration(
+                  hintText: 'Token',
+                  filled: true,
+                  fillColor: PA.card,
+                  border: OutlineInputBorder(borderSide: BorderSide.none),
+                ),
+              ),
+              if (status != null) ...[
+                const SizedBox(height: 10),
+                Text(status!,
+                    style: TextStyle(
+                        color: status!.startsWith('Valid')
+                            ? PA.accent
+                            : PA.error,
+                        fontSize: 12)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: testing
+                  ? null
+                  : () async {
+                      setDialog(() {
+                        testing = true;
+                        status = 'Checking…';
+                      });
+                      final ok = await s.listenBrainz.validate(ctrl.text);
+                      setDialog(() {
+                        testing = false;
+                        status = ok ? 'Valid token ✓' : 'Invalid token';
+                      });
+                    },
+              child: const Text('Test', style: TextStyle(color: PA.accent)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel',
+                  style: TextStyle(color: PA.textSecondary)),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: PA.accent, foregroundColor: Colors.black),
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  if (result != null) {
+    s.settings.update(() => s.settings.listenBrainzToken = result);
   }
 }
 

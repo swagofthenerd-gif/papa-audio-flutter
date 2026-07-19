@@ -7,6 +7,7 @@ import 'bridge.dart';
 import 'db.dart';
 import 'downloads.dart';
 import 'history.dart';
+import 'listenbrainz.dart';
 import 'lyrics.dart';
 import 'local_library.dart';
 import 'models.dart';
@@ -34,6 +35,10 @@ class AppState extends ChangeNotifier {
   final DownloadManager downloads = DownloadManager();
   final PlaylistsService playlists = PlaylistsService();
   final HistoryService history = HistoryService();
+  late final ListenBrainzService listenBrainz = ListenBrainzService(
+    tokenProvider: () => settings.listenBrainzToken,
+    enabledProvider: () => settings.scrobbleEnabled,
+  );
   final SettingsService settings = SettingsService();
   final QueuesStore queues = QueuesStore();
   final RecommendationService recommendations = RecommendationService();
@@ -106,6 +111,11 @@ class AppState extends ChangeNotifier {
       settingsFuture,
       downloadsFuture,
     ]);
+    // Scrobble to ListenBrainz when a play counts as a listen (respects the
+    // user's listen threshold, which matches scrobble conventions).
+    history.onListenRecorded = (t) => listenBrainz.listen(t);
+    // "Now playing" ping on every track change.
+    playerService.onTrackStart = (t) => listenBrainz.playingNow(t);
     history.listenSecondsProvider = () => settings.listenSeconds;
     history.thresholdProvider = (t) {
       if (settings.listenPercentMode && t.duration > 0) {

@@ -109,8 +109,12 @@ class HistoryService extends ChangeNotifier {
     }
   }
 
+  /// Fired once per counted play (post-threshold) — used for scrobbling.
+  void Function(Track t)? onListenRecorded;
+
   Future<void> _record(Track t) async {
     final now = DateTime.now().millisecondsSinceEpoch;
+    onListenRecorded?.call(t);
     counts.update(t.key, (n) => n + 1, ifAbsent: () => 1);
     firstListen.putIfAbsent(t.key, () => now);
     lastListen[t.key] = now;

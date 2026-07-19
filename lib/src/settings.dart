@@ -26,6 +26,10 @@ class SettingsService extends ChangeNotifier {
   /// Pure-black surfaces for OLED screens.
   bool amoled = false;
 
+  /// ListenBrainz scrobbling — submit listens to listenbrainz.org.
+  bool scrobbleEnabled = false;
+  String listenBrainzToken = '';
+
   // Listen counting: fixed seconds, or a percentage of the track's duration.
   int listenSeconds = 20;
   bool listenPercentMode = false;
@@ -93,6 +97,8 @@ class SettingsService extends ChangeNotifier {
     dynamicColors = p.getBool('s.dynamicColors') ?? true;
     amoled = p.getBool('s.amoled') ?? false;
     PA.applyAmoled(amoled);
+    scrobbleEnabled = p.getBool('s.scrobbleEnabled') ?? false;
+    listenBrainzToken = p.getString('s.lbToken') ?? '';
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
     genreSeparators = p.getStringList('s.genreSeps') ?? genreSeparators;
     splitBlacklist = p.getStringList('s.splitBlacklist') ?? splitBlacklist;
@@ -134,6 +140,8 @@ class SettingsService extends ChangeNotifier {
     p.setInt('s.transitionFadeSec', transitionFadeSec);
     p.setBool('s.dynamicColors', dynamicColors);
     p.setBool('s.amoled', amoled);
+    p.setBool('s.scrobbleEnabled', scrobbleEnabled);
+    p.setString('s.lbToken', listenBrainzToken);
     p.setStringList('s.artistSeps', artistSeparators);
     p.setStringList('s.genreSeps', genreSeparators);
     p.setStringList('s.splitBlacklist', splitBlacklist);

@@ -42,6 +42,10 @@ class PlayerService {
   /// Notified whenever a brand-new queue starts (for the saved-queues archive).
   void Function(List<Track>)? onNewQueue;
 
+  /// Fired when playback moves to a new track — used for the ListenBrainz
+  /// "now playing" ping.
+  void Function(Track)? onTrackStart;
+
   Timer? _tick;
 
   PlayerService(this.bridge) {
@@ -99,6 +103,8 @@ class PlayerService {
       _lastInsert = null;
       if (_errorRetryIndex != i) _errorRetryIndex = null; // moved on — re-arm retry
       _prefetchUpcomingYt(i);
+      final started = currentTrack;
+      if (started != null) onTrackStart?.call(started);
       if (_pendingNextKey != null &&
           i != null &&
           i >= 0 &&

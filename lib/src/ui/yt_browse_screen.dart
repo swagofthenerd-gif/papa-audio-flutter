@@ -6,8 +6,76 @@ import '../models.dart';
 import '../theme.dart';
 import '../yt/yt_models.dart';
 import 'dialogs.dart';
+import 'music_hub.dart';
 import 'widgets.dart';
 import 'yt_shelf_row.dart';
+
+/// Resolves an artist name to their real YouTube Music channel and shows the
+/// full artist page (top songs, albums, singles, "fans might also like"). Falls
+/// back to the local/PC hub when the artist isn't on YouTube or search fails
+/// (offline, no bridge). Uses pushReplacement so Back skips this loader.
+class YtArtistLoader extends StatefulWidget {
+  final String name;
+  const YtArtistLoader({super.key, required this.name});
+  @override
+  State<YtArtistLoader> createState() => _YtArtistLoaderState();
+}
+
+class _YtArtistLoaderState extends State<YtArtistLoader> {
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  Future<void> _resolve() async {
+    final s = context.read<AppState>();
+    try {
+      final artist = await s.yt.tube.findArtist(widget.name);
+      if (!mounted) return;
+      if (artist != null) {
+        Navigator.pushReplacement(context,
+            MaterialPageRoute(builder: (_) => YtBrowseScreen(item: artist)));
+      } else {
+        _fallbackToLocal(s);
+      }
+    } catch (_) {
+      if (mounted) _fallbackToLocal(s);
+    }
+  }
+
+  void _fallbackToLocal(AppState s) {
+    Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+            builder: (_) =>
+                MusicHubScreen(query: widget.name, title: widget.name)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: PA.background,
+      appBar: AppBar(
+        backgroundColor: PA.background,
+        title: Text(widget.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 17)),
+      ),
+      body: _error == null
+          ? const Center(child: CircularProgressIndicator(color: PA.accent))
+          : ErrorView(
+              message: _error!,
+              onRetry: () {
+                setState(() => _error = null);
+                _resolve();
+              }),
+    );
+  }
+}
 
 /// A YT Music entity page: album, artist/channel, or playlist. Shows the
 /// header, a Play/Shuffle bar for its tracks, then any sub-shelves (an artist's

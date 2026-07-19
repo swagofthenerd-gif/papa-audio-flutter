@@ -152,6 +152,29 @@ class Innertube {
   Future<List<YtShelf>> browsePage(String browseId) async =>
       parseShelves(await browseRaw(browseId));
 
+  /// Resolve a YouTube Music artist page from a name — used by every "tap the
+  /// artist" affordance to open the real artist experience (top songs, albums,
+  /// singles, "fans might also like") instead of a local name search. Prefers
+  /// an exact-name channel match, else the first artist result.
+  Future<YtMusicItem?> findArtist(String name) async {
+    final shelves = await search(name, filter: 'artists');
+    final wanted = <YtMusicItem>[];
+    for (final s in shelves) {
+      for (final it in s.items) {
+        if ((it.kind == YtItemKind.artist || it.kind == YtItemKind.channel) &&
+            it.browseId != null) {
+          wanted.add(it);
+        }
+      }
+    }
+    if (wanted.isEmpty) return null;
+    final norm = name.toLowerCase().trim();
+    for (final it in wanted) {
+      if (it.title.toLowerCase().trim() == norm) return it;
+    }
+    return wanted.first;
+  }
+
   /// Radio/related queue for a video — powers "keep playing similar".
   Future<List<YtMusicItem>> related(String videoId) async {
     final shelves = parseShelves(await nextRaw(videoId));

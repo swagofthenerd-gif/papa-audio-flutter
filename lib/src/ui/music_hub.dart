@@ -11,6 +11,7 @@ import 'library_tab.dart';
 import 'selection_bar.dart';
 import 'track_tile.dart';
 import 'widgets.dart';
+import 'yt_browse_screen.dart';
 
 /// Spotify-style "go to artist/album" landing: one scroll with labeled
 /// sections in fixed order — YouTube, From your PC, On this phone — each
@@ -145,10 +146,12 @@ void openArtist(BuildContext context, AppState s, Track t) {
 void openArtistName(BuildContext context, AppState s, String name) {
   final artist = s.settings.artistSplitter.split(name).firstOrNull ?? name;
   if (artist.trim().isEmpty) return;
+  // Open the real YouTube Music artist page (top songs, albums, singles,
+  // similar artists). Falls back to the local/PC hub inside the loader when
+  // the artist isn't on YouTube or we're offline.
   Navigator.push(
       Shell.contentContext(context),
-      MaterialPageRoute(
-          builder: (_) => MusicHubScreen(query: artist, title: artist)));
+      MaterialPageRoute(builder: (_) => YtArtistLoader(name: artist)));
 }
 
 class _HubHeader extends StatelessWidget {

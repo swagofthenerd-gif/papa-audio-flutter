@@ -8,6 +8,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../main.dart' show Shell;
 import '../app_state.dart';
 import '../lyrics.dart';
 import '../models.dart';
@@ -29,6 +30,12 @@ class PlayerSheet extends StatefulWidget {
   const PlayerSheet({super.key, required this.navHeight});
 
   static const miniHeight = 62.0;
+
+  /// Registered by the live sheet state. Returns true when it consumed a
+  /// back press (closed the queue panel or collapsed the expanded player).
+  /// The Shell's single PopScope calls this first — the sheet must NOT have
+  /// its own PopScope, or one back press would trigger both handlers.
+  static bool Function()? backHandler;
 
   @override
   State<PlayerSheet> createState() => _PlayerSheetState();
@@ -109,7 +116,24 @@ class _PlayerSheetState extends State<PlayerSheet>
   }
 
   @override
+  void initState() {
+    super.initState();
+    PlayerSheet.backHandler = () {
+      if (_q.value > 0.05) {
+        _spring(_q, 0, -4); // back closes the queue panel first
+        return true;
+      }
+      if (expanded) {
+        _spring(_c, 0, -3);
+        return true;
+      }
+      return false;
+    };
+  }
+
+  @override
   void dispose() {
+    if (PlayerSheet.backHandler != null) PlayerSheet.backHandler = null;
     lyricsOn.dispose();
     videoOn.dispose();
     _c.dispose();
@@ -258,19 +282,9 @@ class _PlayerSheetState extends State<PlayerSheet>
         final fullRect = Rect.fromLTWH(
             (size.width - fullSide) / 2, topInset + 56, fullSide, fullSide);
 
-        return PopScope(
-          canPop: !expanded,
-          onPopInvokedWithResult: (didPop, _) {
-            if (didPop) return;
-            if (_q.value > 0.05) {
-              _spring(_q, 0, -4); // back closes the queue panel first
-            } else {
-              _spring(_c, 0, -3);
-            }
-          },
-          child: AnimatedBuilder(
-            animation: Listenable.merge([_c, _q]),
-            builder: (context, _) {
+        return AnimatedBuilder(
+          animation: Listenable.merge([_c, _q]),
+          builder: (context, _) {
               final top = collapsedTop * (1 - t);
               // Collapsed, the sheet is ONLY the mini strip (the nav bar stays
               // visible and tappable below it); expanded it fills the screen.
@@ -433,8 +447,7 @@ class _PlayerSheetState extends State<PlayerSheet>
                   ),
                 ],
               );
-            },
-          ),
+          },
         );
       },
     );
@@ -1022,10 +1035,13 @@ class _FullPlayer extends StatelessWidget {
                   icon: Icon(Icons.equalizer,
                       size: 20,
                       color: (snap.data ?? false) ? PA.accent : PA.textMuted),
-                  onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const EqualizerScreen())),
+                  onPressed: () {
+                    onCollapse();
+                    Navigator.push(
+                        Shell.contentContext(context),
+                        MaterialPageRoute(
+                            builder: (_) => const EqualizerScreen()));
+                  },
                 ),
               ),
               IconButton(

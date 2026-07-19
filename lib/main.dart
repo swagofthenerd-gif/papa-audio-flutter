@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:provider/provider.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -170,25 +171,41 @@ class Shell extends StatefulWidget {
   /// every screen. Tabs: 0 Home, 1 Search, 2 Library, 3 Downloads.
   static void Function(int index)? switchTo;
 
+  /// The nested content navigator. Screens pushed here slide in UNDER the
+  /// mini player and nav bar, so the player stays visible on every screen.
+  /// Pushes from tab screens land here automatically (nearest Navigator);
+  /// code living OUTSIDE it (player sheet, modal sheets) routes through
+  /// [contentContext].
+  static final GlobalKey<NavigatorState> contentNav =
+      GlobalKey<NavigatorState>();
+
+  /// Context inside the content navigator, for pushes initiated from
+  /// overlays; falls back to the caller's own context pre-shell.
+  static BuildContext contentContext(BuildContext fallback) =>
+      contentNav.currentContext ?? fallback;
+
   @override
   State<Shell> createState() => _ShellState();
 }
 
 class _ShellState extends State<Shell> {
-  int _tab = 0;
+  final ValueNotifier<int> _tab = ValueNotifier(0);
   static const _pages = [HomeTab(), SearchTab(), LibraryTab(), DownloadsTab()];
 
   @override
   void initState() {
     super.initState();
     Shell.switchTo = (i) {
-      if (mounted) setState(() => _tab = i.clamp(0, _pages.length - 1));
+      if (!mounted) return;
+      Shell.contentNav.currentState?.popUntil((r) => r.isFirst);
+      _tab.value = i.clamp(0, _pages.length - 1);
     };
   }
 
   @override
   void dispose() {
     if (Shell.switchTo != null) Shell.switchTo = null;
+    _tab.dispose();
     super.dispose();
   }
 
@@ -196,7 +213,22 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) {
     final ps = context.read<AppState>().playerService;
     final navHeight = 80.0 + MediaQuery.paddingOf(context).bottom;
-    return Scaffold(
+    // ONE back handler for the whole shell, in priority order: the player
+    // sheet (queue panel, then expanded player), then pushed content screens,
+    // then leave the app. Split PopScopes would all fire on a single press.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (PlayerSheet.backHandler?.call() ?? false) return;
+        final nav = Shell.contentNav.currentState;
+        if (nav != null && nav.canPop()) {
+          nav.pop();
+          return;
+        }
+        SystemNavigator.pop();
+      },
+      child: Scaffold(
       body: Stack(
         children: [
           Column(
@@ -204,15 +236,25 @@ class _ShellState extends State<Shell> {
               Expanded(
                 child: SafeArea(
                   bottom: false,
-                  // TickerMode lets hidden tabs know they're offscreen, so
-                  // they can pause timers/polling (see DownloadsTab).
-                  child: IndexedStack(
-                    index: _tab,
-                    children: [
-                      for (var i = 0; i < _pages.length; i++)
-                        TickerMode(enabled: i == _tab, child: _pages[i]),
-                    ],
-                  ),
+                  child: Navigator(
+                      key: Shell.contentNav,
+                      onGenerateRoute: (_) => MaterialPageRoute(
+                        builder: (_) => ValueListenableBuilder<int>(
+                          valueListenable: _tab,
+                          // TickerMode lets hidden tabs know they're
+                          // offscreen, so they can pause timers/polling
+                          // (see DownloadsTab).
+                          builder: (_, tab, _) => IndexedStack(
+                            index: tab,
+                            children: [
+                              for (var i = 0; i < _pages.length; i++)
+                                TickerMode(
+                                    enabled: i == tab, child: _pages[i]),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                 ),
               ),
               const SelectionBar(),
@@ -224,10 +266,16 @@ class _ShellState extends State<Shell> {
                         ? PlayerSheet.miniHeight
                         : 0),
               ),
-              NavigationBar(
+              ValueListenableBuilder<int>(
+                valueListenable: _tab,
+                builder: (_, tab, _) => NavigationBar(
                 backgroundColor: PA.surface,
-                selectedIndex: _tab,
-                onDestinationSelected: (i) => setState(() => _tab = i),
+                selectedIndex: tab,
+                onDestinationSelected: (i) {
+                  // Tab tap clears any pushed screen so the tab itself shows.
+                  Shell.contentNav.currentState?.popUntil((r) => r.isFirst);
+                  _tab.value = i;
+                },
                 destinations: const [
                   NavigationDestination(
                       icon: Icon(Icons.home_outlined),
@@ -244,11 +292,13 @@ class _ShellState extends State<Shell> {
                       selectedIcon: Icon(Icons.download),
                       label: 'Downloads'),
                 ],
+                ),
               ),
             ],
           ),
           Positioned.fill(child: PlayerSheet(navHeight: navHeight)),
         ],
+        ),
       ),
     );
   }

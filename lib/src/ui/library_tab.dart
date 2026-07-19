@@ -11,6 +11,7 @@ import '../player_service.dart';
 import '../text_norm.dart';
 import '../theme.dart';
 import 'collection_menu.dart';
+import 'music_hub.dart';
 import 'playlists_ui.dart';
 import 'selection_bar.dart';
 import 'settings_screen.dart';
@@ -597,8 +598,25 @@ class LocalAlbumScreen extends StatelessWidget {
                   Text(album.name,
                       style: const TextStyle(
                           fontSize: 22, fontWeight: FontWeight.bold)),
-                  Text(album.artist,
-                      style: const TextStyle(color: PA.textSecondary)),
+                  // Tap the artist to open their page — deep-dive navigation.
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => openArtistName(
+                        context, context.read<AppState>(), album.artist),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(album.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: PA.textSecondary)),
+                        ),
+                        const Icon(Icons.chevron_right,
+                            size: 18, color: PA.textMuted),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(fmtCollectionMeta(album.tracks),
                       style: const TextStyle(

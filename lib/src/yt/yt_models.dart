@@ -39,7 +39,7 @@ class YtMusicItem {
     return Track(
       id: 'yt:$id',
       title: title,
-      artist: subtitle.isEmpty ? 'YouTube' : subtitle.split(' · ').first,
+      artist: artistFromSubtitle(subtitle),
       album: null,
       filePath: '',
       duration: (durationSec ?? 0).toDouble(),
@@ -48,6 +48,30 @@ class YtMusicItem {
       // art-less in the player.
       artUri: thumbnail ?? 'https://i.ytimg.com/vi/$id/hqdefault.jpg',
     );
+  }
+
+  /// Pull the artist out of a YT Music subtitle. These come as ` · `-joined
+  /// segments that sometimes lead with a type word ("Song", "Video") and
+  /// trail with view counts / durations, e.g. "Song · Arijit Singh · 394M
+  /// plays" or "Arijit Singh · 2 States". Returns the first segment that
+  /// actually looks like an artist.
+  static String artistFromSubtitle(String subtitle) {
+    if (subtitle.isEmpty) return 'YouTube';
+    const typeWords = {
+      'song', 'video', 'artist', 'album', 'single', 'ep', 'playlist'
+    };
+    final segs = subtitle.split(' · ').map((s) => s.trim()).toList();
+    for (final s in segs) {
+      if (s.isEmpty) continue;
+      final low = s.toLowerCase();
+      if (typeWords.contains(low)) continue; // skip the type label
+      // Skip trailing metadata like "394M plays" / "3:21" / "2020".
+      if (RegExp(r'plays$|views$|^\d[\d.,]*[km]?$|^\d+:\d+$').hasMatch(low)) {
+        continue;
+      }
+      return s;
+    }
+    return segs.first;
   }
 }
 

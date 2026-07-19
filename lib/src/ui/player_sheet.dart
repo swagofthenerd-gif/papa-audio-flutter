@@ -261,7 +261,7 @@ class _PlayerSheetState extends State<PlayerSheet>
         // NEVER overflows on short screens — the art shrinks instead.
         final fullSide = math.min(
           (size.width - 48).clamp(0.0, 380.0),
-          (size.height - topInset - 420).clamp(140.0, 380.0),
+          (size.height - topInset - 468).clamp(140.0, 380.0),
         );
 
         // Heavy subtrees are built ONCE here (per track/stream event). The
@@ -689,6 +689,61 @@ class _AnimatedPlayPauseState extends State<_AnimatedPlayPause>
         size: widget.size,
         color: widget.color,
       );
+}
+
+/// "Up next" strip: shows the track that will play next (shuffle/loop-aware),
+/// tap to jump straight to it, or tap the queue icon to open the full queue.
+class _UpNextStrip extends StatelessWidget {
+  final PlayerService ps;
+  final VoidCallback onOpenQueue;
+  const _UpNextStrip({required this.ps, required this.onOpenQueue});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int?>(
+      stream: ps.currentIndex,
+      builder: (_, _) {
+        final next = ps.effectiveNextTrack;
+        if (next == null) return const SizedBox(height: 34);
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(PA.rSm),
+            onTap: () => ps.next(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(
+                children: [
+                  const Text('UP NEXT',
+                      style: TextStyle(
+                          color: PA.textMuted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text('${next.title} · ${next.artist}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: PA.textSecondary, fontSize: 12)),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.queue_music,
+                        size: 18, color: PA.textMuted),
+                    onPressed: onOpenQueue,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 /// Swipeable artwork carousel for the expanded player: the current art plus
@@ -1147,12 +1202,12 @@ class _FullPlayer extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Spotify-style: title opens the album, artist opens the
-                    // artist hub (YouTube → PC → on-phone, labeled sections).
-                    // Collapse the sheet first — it's an overlay above the
-                    // navigator, so a pushed route would otherwise appear
-                    // *behind* the still-expanded player.
+                    // Title opens the album (falls back to the artist page when
+                    // there's no album, e.g. YT singles). Collapse the sheet
+                    // first — it's an overlay above the navigator, so a pushed
+                    // route would otherwise appear *behind* it.
                     GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () {
                         onCollapse();
                         openAlbum(context, context.read<AppState>(), track);
@@ -1163,15 +1218,25 @@ class _FullPlayer extends StatelessWidget {
                               fontSize: 22, fontWeight: FontWeight.bold)),
                     ),
                     const SizedBox(height: 4),
+                    // Artist → artist page, with a chevron to signal it's a link.
                     GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () {
                         onCollapse();
                         openArtist(context, context.read<AppState>(), track);
                       },
-                      child: _Marquee(
-                          text: track.artist,
-                          style: const TextStyle(
-                              fontSize: 15, color: PA.textSecondary)),
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: _Marquee(
+                                text: track.artist,
+                                style: const TextStyle(
+                                    fontSize: 15, color: PA.textSecondary)),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              size: 18, color: PA.textMuted),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1182,7 +1247,10 @@ class _FullPlayer extends StatelessWidget {
           const Spacer(),
           SeekBar(ps: ps, track: track),
           TransportControls(ps: ps),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
+          // Up next: the track that actually follows (shuffle/loop-aware).
+          _UpNextStrip(ps: ps, onOpenQueue: onQueue),
+          const SizedBox(height: 4),
           // Namida-style utility row: sleep, speed, queue.
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,

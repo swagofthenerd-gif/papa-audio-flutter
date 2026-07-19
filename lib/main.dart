@@ -11,6 +11,7 @@ import 'src/ui/collection_menu.dart';
 import 'src/ui/downloads_tab.dart';
 import 'src/ui/home_tab.dart';
 import 'src/ui/library_tab.dart';
+import 'src/ui/music_hub.dart';
 import 'src/ui/player_sheet.dart';
 import 'src/ui/search_tab.dart';
 import 'src/ui/selection_bar.dart';
@@ -386,8 +387,24 @@ class AlbumScreen extends StatelessWidget {
                   Text(album.name,
                       style: const TextStyle(
                           fontSize: 22, fontWeight: FontWeight.bold)),
-                  Text(album.artist,
-                      style: const TextStyle(color: PA.textSecondary)),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => openArtistName(
+                        context, context.read<AppState>(), album.artist),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(album.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: PA.textSecondary)),
+                        ),
+                        const Icon(Icons.chevron_right,
+                            size: 18, color: PA.textMuted),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 10,

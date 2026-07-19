@@ -250,10 +250,12 @@ class Innertube {
             'racyCheckOk': true,
           }),
         )
-        // Short fuse: a hung /player attempt must fail fast so the next
-        // client in the fallback chain gets its turn — track-start latency
-        // is the whole game here.
-        .timeout(const Duration(seconds: 8));
+        // ANDROID_VR is the only anonymous client that serves *complete*
+        // songs; IOS is capped to ~60s. On a slow mobile connection VR can
+        // take >8s, so keep a forgiving timeout — cutting VR off early and
+        // failing over to IOS is exactly what makes tracks stop after a
+        // minute. 15s fails a genuinely hung attempt without starving VR.
+        .timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
       throw YtException('YT player ${resp.statusCode}', videoId: videoId);
     }

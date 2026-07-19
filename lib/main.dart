@@ -15,6 +15,7 @@ import 'src/ui/music_hub.dart';
 import 'src/ui/player_sheet.dart';
 import 'src/ui/search_tab.dart';
 import 'src/ui/selection_bar.dart';
+import 'src/ui/update_dialog.dart';
 import 'src/ui/track_tile.dart';
 import 'src/ui/widgets.dart';
 
@@ -199,6 +200,8 @@ class _ShellState extends State<Shell> {
   final ValueNotifier<int> _tab = ValueNotifier(0);
   static const _pages = [HomeTab(), SearchTab(), LibraryTab(), DownloadsTab()];
 
+  bool _updatePrompted = false;
+
   @override
   void initState() {
     super.initState();
@@ -207,11 +210,28 @@ class _ShellState extends State<Shell> {
       Shell.contentNav.currentState?.popUntil((r) => r.isFirst);
       _tab.value = i.clamp(0, _pages.length - 1);
     };
+    // Check GitHub for a newer build once the UI is up; prompt if found.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final s = context.read<AppState>();
+      s.updates.addListener(_onUpdateChanged);
+      s.updates.checkForUpdate();
+    });
+  }
+
+  void _onUpdateChanged() {
+    if (!mounted || _updatePrompted) return;
+    final s = context.read<AppState>();
+    if (s.updates.available != null) {
+      _updatePrompted = true;
+      showUpdateDialog(context, s.updates);
+    }
   }
 
   @override
   void dispose() {
     if (Shell.switchTo != null) Shell.switchTo = null;
+    context.read<AppState>().updates.removeListener(_onUpdateChanged);
     _tab.dispose();
     super.dispose();
   }

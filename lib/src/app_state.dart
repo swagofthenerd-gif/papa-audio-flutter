@@ -14,6 +14,7 @@ import 'player_service.dart';
 import 'playlists.dart';
 import 'queues_store.dart';
 import 'recommendations.dart';
+import 'update_service.dart';
 import 'selection.dart';
 import 'settings.dart';
 import 'waveform.dart';
@@ -36,6 +37,7 @@ class AppState extends ChangeNotifier {
   final SettingsService settings = SettingsService();
   final QueuesStore queues = QueuesStore();
   final RecommendationService recommendations = RecommendationService();
+  final UpdateService updates = UpdateService();
   final YtAuth ytAuth = YtAuth();
   late final YtService yt = YtService(ytAuth);
   late final YtVideoController ytVideo = YtVideoController(yt.tube);

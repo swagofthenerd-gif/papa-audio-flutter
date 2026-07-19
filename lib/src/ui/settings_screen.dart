@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../settings.dart';
 import '../theme.dart';
+import '../version.dart';
 import '../yt/yt_login_screen.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
 import 'stats_screen.dart';
+import 'update_dialog.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -386,6 +388,26 @@ class SettingsScreen extends StatelessWidget {
                 child:
                     const Text('Change', style: TextStyle(color: PA.accent)),
               ),
+            ),
+            const _Section('About'),
+            ListTile(
+              leading:
+                  const Icon(Icons.system_update, color: PA.textSecondary),
+              title: const Text('Check for updates'),
+              subtitle: Text('Version $kAppVersionName (build $kAppBuildNumber)',
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+              onTap: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                await s.updates.checkForUpdate(force: true);
+                if (!context.mounted) return;
+                if (s.updates.available != null) {
+                  showUpdateDialog(context, s.updates);
+                } else {
+                  messenger.showSnackBar(const SnackBar(
+                      content: Text('You’re on the latest version'),
+                      duration: Duration(milliseconds: 1500)));
+                }
+              },
             ),
           ],
         ),

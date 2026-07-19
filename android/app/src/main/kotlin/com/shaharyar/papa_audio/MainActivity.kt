@@ -125,6 +125,10 @@ class MainActivity : AudioServiceActivity() {
                         val uri = call.argument<String>("uri") ?: ""
                         runAsync(result) { extractFormat(uri) }
                     }
+                    "installApk" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        mainHandler.post { installApk(path, result) }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -157,6 +161,29 @@ class MainActivity : AudioServiceActivity() {
     // Decodes the whole file to PCM once and keeps the peak amplitude per time
     // bucket. Runs on its own worker; Dart caches the result in SQLite so each
     // track ever pays this cost once.
+
+    /** Hand a downloaded APK to the system package installer via FileProvider.
+     *  The user confirms the install in Android's own UI. */
+    private fun installApk(path: String, result: MethodChannel.Result) {
+        try {
+            val file = java.io.File(path)
+            if (!file.exists()) {
+                result.error("install", "APK not found", null)
+                return
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("install", e.message, null)
+        }
+    }
 
     /** Probe a track's audio format for the "now playing" quality readout:
      *  mime, sample rate, channels, and PCM bit depth when the container

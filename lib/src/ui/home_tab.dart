@@ -117,7 +117,7 @@ class _HomeTabState extends State<HomeTab> {
               // On-device recommendation shelves (mixes, rotations, etc).
               if (showReco)
                 for (final shelf in s.recommendations.shelves)
-                  _RecoShelfView(shelf: shelf),
+                  RecoShelfView(shelf: shelf),
 
               // Personalized YouTube Music shelves (your feed, when signed in).
               if (showReco)
@@ -509,9 +509,9 @@ class _JumpBackInState extends State<_JumpBackIn> {
 
 // ── Recommendation shelves ────────────────────────────────────────────────────
 
-class _RecoShelfView extends StatelessWidget {
+class RecoShelfView extends StatelessWidget {
   final RecoShelf shelf;
-  const _RecoShelfView({required this.shelf});
+  const RecoShelfView({required this.shelf});
   @override
   Widget build(BuildContext context) {
     final s = context.read<AppState>();

@@ -599,6 +599,10 @@ class LocalAlbumScreen extends StatelessWidget {
                           fontSize: 22, fontWeight: FontWeight.bold)),
                   Text(album.artist,
                       style: const TextStyle(color: PA.textSecondary)),
+                  const SizedBox(height: 2),
+                  Text(fmtCollectionMeta(album.tracks),
+                      style: const TextStyle(
+                          color: PA.textMuted, fontSize: 12)),
                   const SizedBox(height: 12),
                   PlayShuffleRow(
                       tracks: album.tracks,
@@ -979,6 +983,14 @@ class _TrackListScreenState extends State<TrackListScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(fmtCollectionMeta(tracks),
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: PlayShuffleRow(

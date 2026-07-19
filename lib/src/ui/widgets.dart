@@ -174,6 +174,18 @@ class ErrorView extends StatelessWidget {
       );
 }
 
+/// "12 songs · 48 min" for a collection subtitle. Sums track durations
+/// (seconds); hides the time part when no durations are known yet.
+String fmtCollectionMeta(List<Track> tracks) {
+  final n = tracks.length;
+  final songs = '$n ${n == 1 ? 'song' : 'songs'}';
+  final secs = tracks.fold<double>(0, (m, t) => m + t.duration);
+  if (secs <= 0) return songs;
+  final mins = (secs / 60).round();
+  if (mins < 60) return '$songs · $mins min';
+  return '$songs · ${mins ~/ 60}h ${mins % 60}m';
+}
+
 /// 215.0 → "3:35"; over an hour → "1:02:35".
 String fmtDuration(double seconds) {
   final d = Duration(seconds: seconds.round());

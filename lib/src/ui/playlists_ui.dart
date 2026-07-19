@@ -178,6 +178,16 @@ class PlaylistScreen extends StatelessWidget {
           ),
           body: Column(
             children: [
+              if (playlist.tracks.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(fmtCollectionMeta(playlist.tracks),
+                        style:
+                            const TextStyle(color: PA.textMuted, fontSize: 12)),
+                  ),
+                ),
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 6),

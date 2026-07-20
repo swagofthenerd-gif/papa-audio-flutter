@@ -220,138 +220,58 @@ class YtLazyAudioSource extends StreamAudioSource {
 
   YtLazyAudioSource(this.videoId, this.resolver, {super.tag});
 
-  // googlevideo rejects unranged and over-large range requests on some client
-  // URLs (403 above ~1–2 MB observed on IOS-minted URLs), so everything is
-  // fetched as bounded chunks and stitched into one stream.
-  static const chunkBytes = 1024 * 1024;
-
-  // The very first chunk is deliberately small: the player can parse headers
-  // and start audio after ~a quarter MB, so track-start latency is dominated
-  // by resolution, not by downloading a full megabyte first.
-  static const firstChunkBytes = 256 * 1024;
-
   @override
   Future<StreamAudioResponse> request([int? start, int? end]) async {
-    final s = await resolver.resolve(videoId);
     final from = start ?? 0;
-    // First chunk fetched eagerly: it validates the URL (errors surface here,
-    // not mid-stream) and its content-range reveals the total length. Ranges
-    // must never run past EOF — googlevideo rejects out-of-bounds requests —
-    // so cap by every length we know.
-    final first =
-        await _fetchChunk(s, from, end ?? s.contentLength, firstChunkBytes);
-    final total = s.contentLength ?? first.total;
-    final endExcl = end ?? total;
-    return StreamAudioResponse(
-      sourceLength: total,
-      contentLength: endExcl != null ? endExcl - from : null,
-      offset: from,
-      stream: _chunks(s, first, from, endExcl),
-      contentType: s.contentType,
-    );
-  }
-
-  Future<_Chunk> _fetchChunk(YtStream s, int from, int? endExcl,
-      [int size = chunkBytes]) async {
-    var to = from + size; // exclusive
-    if (endExcl != null && endExcl < to) to = endExcl;
-    final req = http.Request('GET', Uri.parse(s.url));
-    req.headers['user-agent'] = s.userAgent;
-    req.headers['range'] = 'bytes=$from-${to - 1}';
-    final resp = await _client.send(req).timeout(const Duration(seconds: 20));
-    if (resp.statusCode >= 400) {
-      throw YtException('YT stream HTTP ${resp.statusCode}');
+    // One direct ranged GET, handed straight to the player. ExoPlayer/AVPlayer
+    // drive their own subsequent range requests and buffering — far more robust
+    // than a hand-rolled chunk stitcher. googlevideo honors open-ended ranges
+    // ("bytes=N-") on ANDROID_MUSIC/ANDROID_VR URLs, streaming the whole file.
+    //
+    // If the URL is expired or length-capped it answers 4xx; at the very start
+    // of a track (from == 0) we self-heal once by re-resolving with the capped
+    // client avoided, so the player never sees the failure. Past the start we
+    // must NOT swap URLs (byte offsets differ across client formats) — throw and
+    // let PlayerService restart the track cleanly.
+    http.StreamedResponse? resp;
+    late YtStream s;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      s = await resolver.resolve(videoId);
+      final req = http.Request('GET', Uri.parse(s.url));
+      req.headers['user-agent'] = s.userAgent;
+      req.headers['range'] =
+          end != null ? 'bytes=$from-${end - 1}' : 'bytes=$from-';
+      final r = await _client.send(req).timeout(const Duration(seconds: 20));
+      if (r.statusCode < 400) {
+        resp = r;
+        break;
+      }
+      // Discard the error body so the socket is freed.
+      r.stream.listen((_) {}).cancel();
+      if (attempt == 0 && from == 0) {
+        debugPrint('[yt] stream ${s.client} HTTP ${r.statusCode} — '
+            're-resolving without it');
+        resolver.invalidate(videoId, avoidClient: s.client);
+      } else {
+        throw YtException('YT stream HTTP ${r.statusCode}');
+      }
     }
+    final rr = resp!;
     // "bytes 0-1048575/3143133" → total size after the slash.
     int? total;
-    final cr = resp.headers['content-range'];
+    final cr = rr.headers['content-range'];
     final slash = cr?.lastIndexOf('/') ?? -1;
     if (cr != null && slash >= 0) {
       total = int.tryParse(cr.substring(slash + 1));
     }
-    return _Chunk(resp.stream, from, to, total);
+    total ??= s.contentLength;
+    final endExcl = end ?? total;
+    return StreamAudioResponse(
+      sourceLength: total,
+      contentLength: endExcl != null ? endExcl - from : rr.contentLength,
+      offset: from,
+      stream: rr.stream,
+      contentType: s.contentType,
+    );
   }
-
-  Stream<List<int>> _chunks(
-      YtStream s, _Chunk first, int from, int? endExcl) async* {
-    var chunk = first;
-    Future<_Chunk>? pending;
-    try {
-      while (true) {
-        final limit = endExcl ?? chunk.total ?? s.contentLength;
-        final reqEnd = chunk.requestedTo; // what we asked this chunk to cover
-        // Pipeline: optimistically start fetching the NEXT range (assuming the
-        // server honored this one exactly) while the current chunk streams into
-        // the player, so the network never sits idle between chunks.
-        pending = (limit == null || reqEnd < limit)
-            ? _fetchChunk(s, reqEnd, limit)
-            : null;
-        // Stream this chunk while tallying how many bytes actually arrived —
-        // googlevideo's length-capped URLs (the "~1 min then infinite loading"
-        // bug) quietly serve fewer bytes than requested, or none at all, past
-        // the cap. Counting bytes lets us detect that instead of spinning.
-        var received = 0;
-        await for (final data in chunk.body) {
-          received += data.length;
-          yield data;
-        }
-        final actualEnd = chunk.from + received;
-        // Reached the end of the resource — clean EOF.
-        if (limit != null && actualEnd >= limit) {
-          await _drain(pending);
-          return;
-        }
-        // Unknown total and the server stopped sending — treat as a clean end
-        // rather than a cap (can't prove more data exists).
-        if (limit == null && received == 0) {
-          await _drain(pending);
-          return;
-        }
-        // We KNOW more bytes should exist (actualEnd < limit) but the server
-        // served NOTHING at this offset: the URL is length-capped/dead. Bail
-        // loudly so the player retries with a fresh URL from a different client
-        // (see PlayerService error handler).
-        if (received == 0) {
-          await _drain(pending);
-          throw YtException(
-              'YT stream capped at $actualEnd of $limit (client ${s.client})');
-        }
-        if (actualEnd == reqEnd) {
-          // Server honored the range exactly — the pipelined fetch is correct.
-          chunk = await pending!;
-        } else {
-          // Short read (fewer bytes than asked, but not EOF). The optimistic
-          // pending fetch started at the wrong offset — discard it and fetch
-          // from where the data actually stopped.
-          await _drain(pending);
-          chunk = await _fetchChunk(s, actualEnd, limit);
-        }
-        pending = null;
-      }
-    } catch (e) {
-      debugPrint('[yt] chunk stream $videoId failed: $e');
-      rethrow;
-    } finally {
-      // Generator cancelled (skip/seek) with a fetch in flight — drain it so
-      // the socket is released instead of idling until timeout.
-      await _drain(pending);
-    }
-  }
-
-  /// Consume-and-discard an in-flight chunk fetch so its socket is released.
-  Future<void> _drain(Future<_Chunk>? pending) async {
-    if (pending == null) return;
-    try {
-      final c = await pending;
-      await c.body.listen((_) {}).cancel();
-    } catch (_) {}
-  }
-}
-
-class _Chunk {
-  final http.ByteStream body;
-  final int from; // byte offset this chunk starts at
-  final int requestedTo; // exclusive end we asked the server for
-  final int? total; // full resource size from content-range, when reported
-  _Chunk(this.body, this.from, this.requestedTo, this.total);
 }

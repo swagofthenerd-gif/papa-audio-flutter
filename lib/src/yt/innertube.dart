@@ -40,10 +40,11 @@ class Innertube {
         }
       };
 
-  Future<Map<String, dynamic>> _post(
-      String path, Map<String, dynamic> body) async {
-    // Two tries with a short backoff: transient 5xx / network blips are common
-    // and a single retry turns most of them into a normal load.
+  /// POST with 2-try backoff, returning the raw response body. Kept as a string
+  /// so callers can decode/parse it in ONE isolate hop — sending a short string
+  /// to compute() never janks the UI, whereas sending an already-decoded
+  /// multi-MB map back to an isolate would (serialization runs on the sender).
+  Future<String> _postRaw(String path, Map<String, dynamic> body) async {
     YtException? last;
     for (var attempt = 0; attempt < 2; attempt++) {
       if (attempt > 0) await Future.delayed(const Duration(milliseconds: 400));
@@ -55,10 +56,7 @@ class Innertube {
               body: jsonEncode({'context': _webContext(), ...body}),
             )
             .timeout(const Duration(seconds: 20));
-        if (resp.statusCode == 200) {
-          // Megabytes of JSON — decode off the UI isolate.
-          return await compute(_decodeMap, resp.body);
-        }
+        if (resp.statusCode == 200) return resp.body;
         last = YtException('YT ${resp.statusCode} on /$path');
         if (resp.statusCode < 500 && resp.statusCode != 429) break; // not transient
       } catch (e) {
@@ -67,6 +65,12 @@ class Innertube {
     }
     throw last ?? YtException('YT /$path failed');
   }
+
+  /// Decode the response into a Map off the UI isolate (used where the caller
+  /// needs the raw tree, e.g. /player and continuation-token extraction).
+  Future<Map<String, dynamic>> _post(
+          String path, Map<String, dynamic> body) async =>
+      compute(_decodeMap, await _postRaw(path, body));
 
   Future<Map<String, dynamic>> browseRaw(String browseId,
           {String? params}) =>
@@ -89,68 +93,70 @@ class Innertube {
       });
 
   /// Fetch the next page of a surface via its continuation token.
-  Future<YtPage> continued(String token) async {
-    final json = await _post('browse', {'continuation': token});
-    return YtPage(
-      shelves: parseShelves(json),
-      continuation: _findContinuation(json),
-    );
-  }
+  Future<YtPage> continued(String token) async =>
+      compute(_decodeAndParsePage,
+          await _postRaw('browse', {'continuation': token}));
 
   /// Browse a surface and also surface its continuation token for paging.
   Future<YtPage> browsePaged(String browseId, {String? params}) async {
-    final json = await browseRaw(browseId, params: params);
-    return YtPage(
-      shelves: parseShelves(json),
-      continuation: _findContinuation(json),
-    );
+    final body = await _postRaw('browse', {
+      'browseId': browseId,
+      if (params != null) 'params': params,
+    });
+    return compute(_decodeAndParsePage, body);
   }
 
   // ── Surfaces ───────────────────────────────────────────────────────────────
 
+  /// Browse a surface and decode+parse it into shelves entirely OFF the UI
+  /// isolate. The signed-in home feed is large; parsing it on the main thread
+  /// froze the UI (the home showed grey skeletons until the parse finished).
+  Future<List<YtShelf>> _browseShelves(String browseId, {String? params}) async {
+    final body = await _postRaw('browse', {
+      'browseId': browseId,
+      if (params != null) 'params': params,
+    });
+    return compute(_decodeAndParseShelves, body);
+  }
+
   /// The signed-in user's YT Music home feed (mixes, listen again, made for
   /// you…). Anonymous when signed out — still returns generic shelves.
-  Future<List<YtShelf>> home() async =>
-      parseShelves(await browseRaw('FEmusic_home'));
+  Future<List<YtShelf>> home() => _browseShelves('FEmusic_home');
 
-  Future<List<YtShelf>> explore() async =>
-      parseShelves(await browseRaw('FEmusic_explore'));
+  Future<List<YtShelf>> explore() => _browseShelves('FEmusic_explore');
 
-  Future<List<YtShelf>> charts() async =>
-      parseShelves(await browseRaw('FEmusic_charts'));
+  Future<List<YtShelf>> charts() => _browseShelves('FEmusic_charts');
 
-  Future<List<YtShelf>> moodsAndGenres() async =>
-      parseShelves(await browseRaw('FEmusic_moods_and_genres'));
+  Future<List<YtShelf>> moodsAndGenres() =>
+      _browseShelves('FEmusic_moods_and_genres');
 
   /// New releases (albums/singles) — includes the signed-in user's
   /// subscription-driven releases at the top when logged in.
-  Future<List<YtShelf>> newReleases() async =>
-      parseShelves(await browseRaw('FEmusic_new_releases'));
+  Future<List<YtShelf>> newReleases() => _browseShelves('FEmusic_new_releases');
 
   /// Listening history, sectioned by day, newest first.
-  Future<List<YtShelf>> history() async =>
-      parseShelves(await browseRaw('FEmusic_history'));
+  Future<List<YtShelf>> history() => _browseShelves('FEmusic_history');
 
   /// The user's saved/created playlists.
-  Future<List<YtShelf>> libraryPlaylists() async =>
-      parseShelves(await browseRaw('FEmusic_liked_playlists'));
+  Future<List<YtShelf>> libraryPlaylists() =>
+      _browseShelves('FEmusic_liked_playlists');
 
   /// Artists the user subscribed to / added to library.
-  Future<List<YtShelf>> libraryArtists() async =>
-      parseShelves(await browseRaw('FEmusic_library_corpus_artists'));
+  Future<List<YtShelf>> libraryArtists() =>
+      _browseShelves('FEmusic_library_corpus_artists');
 
   /// Liked songs — YT Music models them as the special "LM" playlist.
   Future<List<YtShelf>> likedSongs() => playlist('LM');
 
   /// Any playlist / album-as-playlist. Accepts bare ids or VL-prefixed.
-  Future<List<YtShelf>> playlist(String playlistId) async {
+  Future<List<YtShelf>> playlist(String playlistId) {
     final id = playlistId.startsWith('VL') ? playlistId : 'VL$playlistId';
-    return parseShelves(await browseRaw(id));
+    return _browseShelves(id);
   }
 
   /// Artist/channel page (UC…) or album page (MPRE…).
-  Future<List<YtShelf>> browsePage(String browseId) async =>
-      parseShelves(await browseRaw(browseId));
+  Future<List<YtShelf>> browsePage(String browseId) =>
+      _browseShelves(browseId);
 
   /// Resolve a YouTube Music artist page from a name — used by every "tap the
   /// artist" affordance to open the real artist experience (top songs, albums,
@@ -198,7 +204,8 @@ class Innertube {
 
   /// Radio/related queue for a video — powers "keep playing similar".
   Future<List<YtMusicItem>> related(String videoId) async {
-    final shelves = parseShelves(await nextRaw(videoId));
+    final body = await _postRaw('next', {'videoId': videoId});
+    final shelves = await compute(_decodeAndParseShelves, body);
     return [
       for (final s in shelves) ...s.items.where((i) => i.videoId != null)
     ];
@@ -217,10 +224,13 @@ class Innertube {
   Future<List<YtShelf>> search(String query, {String? filter}) async {
     final params = filter != null ? searchFilters[filter] : null;
     try {
-      return parseShelves(await searchRaw(query, params: params));
+      final body = await _postRaw('search',
+          {'query': query, if (params != null) 'params': params});
+      return await compute(_decodeAndParseShelves, body);
     } on YtException {
       if (params == null) rethrow;
-      return parseShelves(await searchRaw(query)); // filter rejected — retry
+      final body = await _postRaw('search', {'query': query});
+      return await compute(_decodeAndParseShelves, body); // filter rejected — retry
     }
   }
 
@@ -730,7 +740,8 @@ class Innertube {
 
   /// First continuation token anywhere in the response (YT nests it under
   /// several renderer-specific keys; the token itself is always `continuation`).
-  static String? _findContinuation(Map<String, dynamic> root) {
+  /// Public so the top-level isolate worker [_decodeAndParsePage] can call it.
+  static String? findContinuation(Map<String, dynamic> root) {
     String? found;
     _walk(root, (key, node) {
       if (found != null) return;
@@ -780,3 +791,18 @@ class YtException implements Exception {
 /// Isolate worker for [compute] — innertube responses are large.
 Map<String, dynamic> _decodeMap(String raw) =>
     jsonDecode(raw) as Map<String, dynamic>;
+
+/// Decode + parse a browse/search response into shelves in a single isolate
+/// hop from the raw body string. Keeps the big JSON tree entirely off the UI
+/// isolate (the signed-in home feed froze the home tab otherwise).
+List<YtShelf> _decodeAndParseShelves(String raw) =>
+    Innertube.parseShelves(jsonDecode(raw) as Map<String, dynamic>);
+
+/// Same, but also extracting the continuation token for paginated surfaces.
+YtPage _decodeAndParsePage(String raw) {
+  final json = jsonDecode(raw) as Map<String, dynamic>;
+  return YtPage(
+    shelves: Innertube.parseShelves(json),
+    continuation: Innertube.findContinuation(json),
+  );
+}

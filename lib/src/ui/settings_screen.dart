@@ -429,9 +429,11 @@ class SettingsScreen extends StatelessWidget {
                 if (s.updates.available != null) {
                   showUpdateDialog(context, s.updates);
                 } else {
-                  messenger.showSnackBar(const SnackBar(
-                      content: Text('You’re on the latest version'),
-                      duration: Duration(milliseconds: 1500)));
+                  final err = s.updates.lastError;
+                  messenger.showSnackBar(SnackBar(
+                      content: Text(err ?? 'You’re on the latest version'),
+                      duration: Duration(
+                          milliseconds: err != null ? 3500 : 1500)));
                 }
               },
             ),

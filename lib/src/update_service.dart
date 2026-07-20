@@ -37,6 +37,12 @@ class UpdateService extends ChangeNotifier {
 
   /// 0..1 while downloading; null when idle.
   double? downloadProgress;
+
+  /// Why the last check found nothing — surfaced by the manual "Check for
+  /// updates" action so a silent failure (offline, rate-limited, exception)
+  /// is distinguishable from genuinely being up to date. null after a clean
+  /// check that simply found no newer build.
+  String? lastError;
   bool _checked = false;
 
   /// Fetch the latest release and, if newer than [kAppBuildNumber], expose it
@@ -44,6 +50,7 @@ class UpdateService extends ChangeNotifier {
   Future<void> checkForUpdate({bool force = false}) async {
     if (_checked && !force) return;
     _checked = true;
+    lastError = null;
     try {
       final resp = await http
           .get(
@@ -51,7 +58,12 @@ class UpdateService extends ChangeNotifier {
             headers: {'Accept': 'application/vnd.github+json'},
           )
           .timeout(const Duration(seconds: 12));
-      if (resp.statusCode != 200) return;
+      if (resp.statusCode != 200) {
+        lastError = resp.statusCode == 403
+            ? 'GitHub rate-limited this check. Try again in a few minutes.'
+            : 'Update check failed (HTTP ${resp.statusCode}).';
+        return;
+      }
       final json = jsonDecode(resp.body) as Map<String, dynamic>;
       final tag = (json['tag_name'] ?? '').toString();
       final build = int.tryParse(tag.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
@@ -62,7 +74,10 @@ class UpdateService extends ChangeNotifier {
             orElse: () => const {},
           );
       final apkUrl = apk['browser_download_url']?.toString();
-      if (apkUrl == null) return;
+      if (apkUrl == null) {
+        lastError = 'Release $tag has no APK attached yet.';
+        return;
+      }
       available = UpdateInfo(
         buildNumber: build,
         versionName: tag.replaceFirst(RegExp(r'^v'), ''),
@@ -71,8 +86,12 @@ class UpdateService extends ChangeNotifier {
         sizeBytes: (apk['size'] as num?)?.toInt(),
       );
       notifyListeners();
-    } catch (_) {
-      // Offline / rate-limited / no releases — stay quiet.
+    } catch (e) {
+      // Offline / rate-limited / no releases — stay quiet in the auto-check,
+      // but record why so the manual check can explain the failure.
+      lastError = e is TimeoutException
+          ? 'Update check timed out. Check your connection.'
+          : 'Update check failed — no connection?';
     }
   }
 

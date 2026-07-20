@@ -94,6 +94,15 @@ class QueuesStore extends ChangeNotifier {
           .delete('saved_queues', where: 'at = ?', whereArgs: [q.at]);
     } catch (_) {}
   }
+
+  /// Undo a [delete]: re-insert the snapshot in newest-first order and persist.
+  Future<void> restore(SavedQueue q) async {
+    if (saved.any((e) => e.at == q.at)) return;
+    saved.add(q);
+    saved.sort((a, b) => b.at.compareTo(a.at));
+    notifyListeners();
+    await _persist(q, q.sig);
+  }
 }
 
 class SavedQueue {

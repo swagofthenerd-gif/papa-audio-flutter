@@ -16,7 +16,7 @@ feel-per-effort within each section. Verify each on the emulator.
 - [x] **[S] AnimatedIcon play/pause** — player main button + expanded utility row now morph (`AnimatedIcons.play_pause`). TODO: mini-bar bottom strip if it has its own.
 - [ ] **[S] Hero cross-fade** — `Hero` on artwork from card → album/player so it morphs instead of cutting.
 - [x] **[S] Empty-state polish** — shared `EmptyState` (icon + title + hint + optional action) in widgets.dart; applied to library tabs (tracks/albums/artists/folders/genres), empty playlist, YT library. Search idle already shows the Explore feed; search no-results already iconified. (2026-07-20)
-- [ ] **[S] Undo snackbars** on every destructive action — playlist track remove already lacks one; audit delete/remove flows.
+- [x] **[S] Undo snackbars** on every destructive action — added to playlist-track remove and saved-queue delete (2026-07-20); in-player queue remove and history-entry delete already had them. All swipe-to-remove flows now undoable.
 - [x] **[S] Bouncy scroll physics** — app-wide `BouncingScrollPhysics` + stretch overscroll via `MaterialApp.scrollBehavior`.
 
 ## 2. Home & library feel

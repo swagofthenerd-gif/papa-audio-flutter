@@ -174,6 +174,14 @@ class PlaylistsService extends ChangeNotifier {
     await _rewriteTracks(p);
   }
 
+  /// Re-insert a track at [index] (used to undo a [removeAt]).
+  Future<void> insertAt(Playlist p, int index, Track t) async {
+    p.tracks.insert(index.clamp(0, p.tracks.length), t);
+    p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+    await _rewriteTracks(p);
+  }
+
   /// Keeps the first occurrence of each track; returns how many rows left.
   Future<int> removeDuplicates(Playlist p) async {
     final seen = <String>{};

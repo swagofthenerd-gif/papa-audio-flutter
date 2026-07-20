@@ -220,8 +220,24 @@ class PlaylistScreen extends StatelessWidget {
                               child:
                                   const Icon(Icons.delete, color: Colors.white),
                             ),
-                            onDismissed: (_) =>
-                                s.playlists.removeAt(playlist, i),
+                            onDismissed: (_) {
+                              final removed = t;
+                              final at = i;
+                              s.playlists.removeAt(playlist, at);
+                              ScaffoldMessenger.of(context)
+                                ..clearSnackBars()
+                                ..showSnackBar(SnackBar(
+                                  content: Text('Removed ${removed.title}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                  behavior: SnackBarBehavior.floating,
+                                  action: SnackBarAction(
+                                    label: 'Undo',
+                                    onPressed: () => s.playlists
+                                        .insertAt(playlist, at, removed),
+                                  ),
+                                ));
+                            },
                             child: TrackTile(
                               track: t,
                               swipeActions: false,
@@ -271,9 +287,10 @@ class QueuesView extends StatelessWidget {
               .toList();
         }
         if (queues.isEmpty) {
-          return const Center(
-              child: Text('Queues you play are archived here',
-                  style: TextStyle(color: PA.textSecondary)));
+          return const EmptyState(
+              icon: Icons.history_toggle_off_outlined,
+              title: 'No saved queues',
+              hint: 'Queues you play are archived here automatically.');
         }
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 80),
@@ -290,7 +307,19 @@ class QueuesView extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 20),
                 child: const Icon(Icons.delete, color: Colors.white),
               ),
-              onDismissed: (_) => s.queues.delete(q),
+              onDismissed: (_) {
+                s.queues.delete(q);
+                ScaffoldMessenger.of(context)
+                  ..clearSnackBars()
+                  ..showSnackBar(SnackBar(
+                    content: const Text('Queue removed'),
+                    behavior: SnackBarBehavior.floating,
+                    action: SnackBarAction(
+                      label: 'Undo',
+                      onPressed: () => s.queues.restore(q),
+                    ),
+                  ));
+              },
               child: ListTile(
                 leading: TrackArt(
                     artUri: first.artUri,

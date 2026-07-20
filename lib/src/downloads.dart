@@ -14,6 +14,10 @@ import 'yt/yt_service.dart';
 /// small JSON index alongside. Progress is exposed per track id while a
 /// download is running.
 class DownloadManager extends ChangeNotifier {
+  // Sequential download chunk size. googlevideo rejects unranged / over-large
+  // requests on some client URLs, so YT downloads pull bounded ranges.
+  static const _dlChunkBytes = 1024 * 1024;
+
   Directory? _dir;
   int _lastProgressNotify = 0;
   final Map<String, double> progress = {}; // track id → 0..1 (in flight)
@@ -178,7 +182,7 @@ class DownloadManager extends ChangeNotifier {
           // Guard against a server that keeps answering without advancing us
           // (e.g. ignoring the range header) — never loop forever.
           if (++chunks > 512) throw 'download did not advance';
-          var to = received + YtLazyAudioSource.chunkBytes; // exclusive
+          var to = received + _dlChunkBytes; // exclusive
           if (total > 0 && to > total) to = total;
           final req = http.Request('GET', Uri.parse(stream.url));
           req.headers['user-agent'] = stream.userAgent;
@@ -211,7 +215,7 @@ class DownloadManager extends ChangeNotifier {
               }
             }
           }
-          if (total == 0 && got < YtLazyAudioSource.chunkBytes) break; // EOF
+          if (total == 0 && got < _dlChunkBytes) break; // EOF
           if (got == 0) break; // server stopped serving — avoid spinning
         }
       } finally {

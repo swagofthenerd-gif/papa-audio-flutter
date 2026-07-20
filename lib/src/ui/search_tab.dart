@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
@@ -142,10 +143,16 @@ class _UnifiedResults extends StatefulWidget {
   State<_UnifiedResults> createState() => _UnifiedResultsState();
 }
 
+/// Media-type filter for the unified search results.
+enum _ResultFilter { all, songs, albums, artists }
+
 class _UnifiedResultsState extends State<_UnifiedResults> {
   bool _busy = false;
   String? _error;
   _Results _r = const _Results();
+  _ResultFilter _filter = _ResultFilter.all;
+
+  bool _show(_ResultFilter f) => _filter == _ResultFilter.all || _filter == f;
 
   @override
   void initState() {
@@ -241,39 +248,49 @@ class _UnifiedResultsState extends State<_UnifiedResults> {
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
     final r = _r;
+    final showSongs = _show(_ResultFilter.songs);
+    final showAlbums = _show(_ResultFilter.albums);
+    final showArtists = _show(_ResultFilter.artists);
     return Column(
       children: [
         if (_busy)
           const LinearProgressIndicator(
               color: PA.accent, backgroundColor: PA.card),
+        if (!r.isEmpty) _filterChips(),
         Expanded(
           child: (r.isEmpty && !_busy)
               ? _EmptyResults(query: widget.query, error: _error)
               : ListView(
                   padding: const EdgeInsets.only(bottom: 90),
                   children: [
-                    // Top result — the single strongest hit.
-                    if (_topResult() != null) _topResult()!,
+                    // Top result — the single strongest hit. Only in "All".
+                    if (_filter == _ResultFilter.all && _topResult() != null)
+                      _topResult()!,
 
-                    if (r.localSongs.isNotEmpty || r.localAlbums.isNotEmpty)
+                    if (showSongs &&
+                        (r.localSongs.isNotEmpty || r.localAlbums.isNotEmpty))
                       const _SectionHeader('From your library'),
-                    for (final t in r.localSongs.take(4))
-                      TrackTile(
-                        track: t,
-                        onTap: () => s.playTrackInList(
-                            r.localSongs, r.localSongs.indexOf(t)),
-                      ),
-                    if (r.localSongs.length > 4)
-                      _MoreButton(
-                        label: 'All ${r.localSongs.length} songs in your library',
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => TrackListScreen(
-                                    title: '“${widget.query}” in your library',
-                                    tracks: r.localSongs))),
-                      ),
-                    if (r.localAlbums.isNotEmpty)
+                    if (showSongs) ...[
+                      for (final t in r.localSongs.take(4))
+                        TrackTile(
+                          track: t,
+                          onTap: () => s.playTrackInList(
+                              r.localSongs, r.localSongs.indexOf(t)),
+                        ),
+                      if (r.localSongs.length > 4)
+                        _MoreButton(
+                          label:
+                              'All ${r.localSongs.length} songs in your library',
+                          onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => TrackListScreen(
+                                      title:
+                                          '“${widget.query}” in your library',
+                                      tracks: r.localSongs))),
+                        ),
+                    ],
+                    if (showAlbums && r.localAlbums.isNotEmpty)
                       _AlbumRow(
                         albums: r.localAlbums,
                         onTap: (a) => Navigator.push(
@@ -282,15 +299,17 @@ class _UnifiedResultsState extends State<_UnifiedResults> {
                                 builder: (_) => LocalAlbumScreen(album: a))),
                       ),
 
-                    if (r.ytSongs.isNotEmpty) const _SectionHeader('Songs'),
-                    for (final it in r.ytSongs.take(8))
-                      _YtSongTile(item: it),
+                    if (showSongs && r.ytSongs.isNotEmpty)
+                      const _SectionHeader('Songs'),
+                    if (showSongs)
+                      for (final it in r.ytSongs.take(8))
+                        _YtSongTile(item: it),
 
-                    if (r.ytAlbums.isNotEmpty) ...[
+                    if (showAlbums && r.ytAlbums.isNotEmpty) ...[
                       const _SectionHeader('Albums'),
                       _YtCardRow(items: r.ytAlbums),
                     ],
-                    if (r.ytArtists.isNotEmpty) ...[
+                    if (showArtists && r.ytArtists.isNotEmpty) ...[
                       const _SectionHeader('Artists'),
                       _YtCardRow(items: r.ytArtists),
                     ],
@@ -305,6 +324,46 @@ class _UnifiedResultsState extends State<_UnifiedResults> {
                 ),
         ),
       ],
+    );
+  }
+
+  /// Media-type filter chips above the results (All / Songs / Albums /
+  /// Artists) — Namida-style result narrowing.
+  Widget _filterChips() {
+    const labels = {
+      _ResultFilter.all: 'All',
+      _ResultFilter.songs: 'Songs',
+      _ResultFilter.albums: 'Albums',
+      _ResultFilter.artists: 'Artists',
+    };
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: [
+          for (final f in _ResultFilter.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(labels[f]!),
+                selected: _filter == f,
+                showCheckmark: false,
+                selectedColor: PA.accent,
+                backgroundColor: PA.card,
+                labelStyle: TextStyle(
+                    color: _filter == f ? Colors.black : PA.textSecondary,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13),
+                side: BorderSide.none,
+                onSelected: (_) {
+                  HapticFeedback.selectionClick();
+                  setState(() => _filter = f);
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 

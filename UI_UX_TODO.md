@@ -44,7 +44,7 @@ feel-per-effort within each section. Verify each on the emulator.
 
 ## 4. Navigation, search & interactions
 - [ ] **[M] Global search overlay** — morphing app-bar search field with sectioned results (album/artist rows above the track list) — the Namida search feel.
-- [ ] **[S] Media-type filter chips** in search results (songs / albums / artists / playlists).
+- [x] **[S] Media-type filter chips** in search results (All / Songs / Albums / Artists) — narrow the unified results by type, haptic on select. (2026-07-20)
 - [ ] **[S] FAB config** — none / search / shuffle / play, per setting.
 - [ ] **[S] Collection context menus** — ensure album/artist/genre/folder/playlist long-press menus all offer play-next/add-queue/shuffle/add-to-playlist/go-to consistently.
 - [ ] **[M] Multi-select extras** — range selection, bulk actions bar polish.

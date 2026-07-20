@@ -332,7 +332,7 @@ class Innertube {
   /// Resolve a direct audio stream. Signed in, ANDROID_MUSIC leads (best
   /// quality); anonymous, it always answers LOGIN_REQUIRED so lead with the
   /// clients that resolve without an account.
-  Future<YtStream> playerStream(String videoId) async {
+  Future<YtStream> playerStream(String videoId, {String? avoid}) async {
     var clients = auth.signedIn
         ? [
             (_androidMusicClient, androidMusicUserAgent, _base),
@@ -347,8 +347,16 @@ class Innertube {
             (_androidVrClient, androidVrUserAgent, _wwwBase),
             (_iosClient, iosUserAgent, _wwwBase),
           ];
+    // A retry after a mid-stream cap tells us which client's URL died; drop it
+    // so we resolve a full-file URL from a different client this time.
+    if (avoid != null) {
+      clients =
+          clients.where((c) => c.$1['clientName'] != avoid).toList();
+    }
+    // Prefer the last client that produced a WORKING (non-capped) full stream —
+    // unless we're explicitly avoiding it.
     final lastGood = _lastGoodPlayerClient;
-    if (lastGood != null) {
+    if (lastGood != null && lastGood != avoid) {
       clients = [
         ...clients.where((c) => c.$1['clientName'] == lastGood),
         ...clients.where((c) => c.$1['clientName'] != lastGood),
@@ -360,14 +368,14 @@ class Innertube {
         final json = await _playerJson(videoId, client.$1, client.$2,
             base: client.$3,
             authed: auth.signedIn && client.$1 == _androidMusicClient);
-        final s = _bestAudio(json, client.$2);
+        final name = client.$1['clientName'] as String;
+        final s = _bestAudio(json, client.$2, name);
         if (s != null) {
-          // Only make FULL-stream clients sticky. IOS anonymous URLs are
-          // PO-token-capped to ~1 MB (~60 s), so if we stuck to IOS every
-          // track would cut out after a minute and VR would never get
-          // re-probed. Leave lastGood unset (or on VR/MUSIC) in that case.
-          final name = client.$1['clientName'] as String;
-          if (name != 'IOS' || auth.signedIn) {
+          // Only make FULL-stream clients sticky. IOS URLs are always
+          // PO-token-capped to ~1 MB (~60 s) — signed in OR anonymous, since we
+          // never send auth on the IOS call — so sticking to IOS makes every
+          // track cut out after a minute. Never let IOS become sticky.
+          if (name != 'IOS') {
             _lastGoodPlayerClient = name;
           }
           return s;
@@ -413,7 +421,8 @@ class Innertube {
     }
   }
 
-  static YtStream? _bestAudio(Map<String, dynamic> json, String userAgent) {
+  static YtStream? _bestAudio(
+      Map<String, dynamic> json, String userAgent, String client) {
     final sd = json['streamingData'] as Map<String, dynamic>?;
     final formats = [
       ...?(sd?['adaptiveFormats'] as List?),
@@ -441,6 +450,7 @@ class Innertube {
       expiresAt:
           DateTime.now().add(Duration(seconds: (expiresIn - 120).clamp(60, 86400))),
       userAgent: userAgent,
+      client: client,
     );
   }
 

@@ -159,16 +159,23 @@ class YtStreamResolver {
   static const _cap = 128; // bounded LRU — hours of playback can't grow this
   final Map<String, Future<YtStream>> _inFlight = {};
   final Map<String, YtStream> _cache = {}; // insertion-ordered => LRU
+  // A client to skip on the NEXT resolve of a video, set when its URL turned
+  // out capped mid-stream. Consumed once so a later fresh attempt is unbiased.
+  final Map<String, String> _avoidNext = {};
+
+  /// The client that minted the currently-cached stream for [videoId], if any.
+  String? clientFor(String videoId) => _cache[videoId]?.client;
 
   Future<YtStream> resolve(String videoId) {
+    final avoid = _avoidNext.remove(videoId);
     final hit = _cache.remove(videoId);
-    if (hit != null && hit.fresh) {
+    if (hit != null && hit.fresh && (avoid == null || hit.client != avoid)) {
       _cache[videoId] = hit; // re-insert = mark most-recently-used
       return Future.value(hit);
     }
     final pending = _inFlight[videoId];
     if (pending != null) return pending;
-    final future = tube.playerStream(videoId).then((s) {
+    final future = tube.playerStream(videoId, avoid: avoid).then((s) {
       _cache[videoId] = s;
       while (_cache.length > _cap) {
         _cache.remove(_cache.keys.first); // evict least-recently-used
@@ -180,8 +187,12 @@ class YtStreamResolver {
   }
 
   /// Drop a cached stream so the next resolve re-fetches a fresh URL. Used when
-  /// playback of a track fails — most failures are simply expired URLs.
-  void invalidate(String videoId) {
+  /// playback of a track fails — most failures are simply expired URLs. Pass
+  /// [avoidClient] to steer the retry away from a client whose URL was capped.
+  void invalidate(String videoId, {String? avoidClient}) {
+    if (avoidClient != null && avoidClient.isNotEmpty) {
+      _avoidNext[videoId] = avoidClient;
+    }
     _cache.remove(videoId);
     _inFlight.remove(videoId);
   }
@@ -247,7 +258,7 @@ class YtLazyAudioSource extends StreamAudioSource {
     final req = http.Request('GET', Uri.parse(s.url));
     req.headers['user-agent'] = s.userAgent;
     req.headers['range'] = 'bytes=$from-${to - 1}';
-    final resp = await _client.send(req).timeout(const Duration(seconds: 30));
+    final resp = await _client.send(req).timeout(const Duration(seconds: 20));
     if (resp.statusCode >= 400) {
       throw YtException('YT stream HTTP ${resp.statusCode}');
     }
@@ -258,7 +269,7 @@ class YtLazyAudioSource extends StreamAudioSource {
     if (cr != null && slash >= 0) {
       total = int.tryParse(cr.substring(slash + 1));
     }
-    return _Chunk(resp.stream, to, total);
+    return _Chunk(resp.stream, from, to, total);
   }
 
   Stream<List<int>> _chunks(
@@ -267,37 +278,80 @@ class YtLazyAudioSource extends StreamAudioSource {
     Future<_Chunk>? pending;
     try {
       while (true) {
-        final pos = chunk.nextFrom;
         final limit = endExcl ?? chunk.total ?? s.contentLength;
-        // Pipeline: start fetching the NEXT chunk while the current one is
-        // still streaming into the player, so the network never sits idle
-        // between chunks (this was a visible stall every megabyte).
-        pending = (limit == null || pos < limit)
-            ? _fetchChunk(s, pos, limit)
+        final reqEnd = chunk.requestedTo; // what we asked this chunk to cover
+        // Pipeline: optimistically start fetching the NEXT range (assuming the
+        // server honored this one exactly) while the current chunk streams into
+        // the player, so the network never sits idle between chunks.
+        pending = (limit == null || reqEnd < limit)
+            ? _fetchChunk(s, reqEnd, limit)
             : null;
-        yield* chunk.body;
-        if (pending == null) return;
-        try {
-          chunk = await pending;
-          pending = null;
-        } catch (e) {
-          debugPrint('[yt] chunk $videoId @$pos/$limit failed: $e');
-          rethrow;
+        // Stream this chunk while tallying how many bytes actually arrived —
+        // googlevideo's length-capped URLs (the "~1 min then infinite loading"
+        // bug) quietly serve fewer bytes than requested, or none at all, past
+        // the cap. Counting bytes lets us detect that instead of spinning.
+        var received = 0;
+        await for (final data in chunk.body) {
+          received += data.length;
+          yield data;
         }
+        final actualEnd = chunk.from + received;
+        // Reached the end of the resource — clean EOF.
+        if (limit != null && actualEnd >= limit) {
+          await _drain(pending);
+          return;
+        }
+        // Unknown total and the server stopped sending — treat as a clean end
+        // rather than a cap (can't prove more data exists).
+        if (limit == null && received == 0) {
+          await _drain(pending);
+          return;
+        }
+        // We KNOW more bytes should exist (actualEnd < limit) but the server
+        // served NOTHING at this offset: the URL is length-capped/dead. Bail
+        // loudly so the player retries with a fresh URL from a different client
+        // (see PlayerService error handler).
+        if (received == 0) {
+          await _drain(pending);
+          throw YtException(
+              'YT stream capped at $actualEnd of $limit (client ${s.client})');
+        }
+        if (actualEnd == reqEnd) {
+          // Server honored the range exactly — the pipelined fetch is correct.
+          chunk = await pending!;
+        } else {
+          // Short read (fewer bytes than asked, but not EOF). The optimistic
+          // pending fetch started at the wrong offset — discard it and fetch
+          // from where the data actually stopped.
+          await _drain(pending);
+          chunk = await _fetchChunk(s, actualEnd, limit);
+        }
+        pending = null;
       }
+    } catch (e) {
+      debugPrint('[yt] chunk stream $videoId failed: $e');
+      rethrow;
     } finally {
       // Generator cancelled (skip/seek) with a fetch in flight — drain it so
       // the socket is released instead of idling until timeout.
-      pending
-          ?.then((c) => c.body.listen((_) {}).cancel())
-          .catchError((_) {});
+      await _drain(pending);
     }
+  }
+
+  /// Consume-and-discard an in-flight chunk fetch so its socket is released.
+  Future<void> _drain(Future<_Chunk>? pending) async {
+    if (pending == null) return;
+    try {
+      final c = await pending;
+      await c.body.listen((_) {}).cancel();
+    } catch (_) {}
   }
 }
 
 class _Chunk {
   final http.ByteStream body;
-  final int nextFrom; // exclusive end of this chunk = start of the next
+  final int from; // byte offset this chunk starts at
+  final int requestedTo; // exclusive end we asked the server for
   final int? total; // full resource size from content-range, when reported
-  _Chunk(this.body, this.nextFrom, this.total);
+  _Chunk(this.body, this.from, this.requestedTo, this.total);
 }

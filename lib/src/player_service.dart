@@ -88,7 +88,13 @@ class PlayerService {
       try {
         if (isYt && _errorRetryIndex != i) {
           _errorRetryIndex = i; // one retry per track occurrence
-          ytResolver?.invalidate(t.id.substring(3));
+          final vid = t.id.substring(3);
+          // Most failures are expired URLs; the other common one is a
+          // length-capped URL (plays ~1 min, then the stream dies). Steer the
+          // retry away from whichever client just produced the dead URL so we
+          // resolve a full-file stream from a different client.
+          ytResolver?.invalidate(vid,
+              avoidClient: ytResolver?.clientFor(vid));
           await _player.seek(Duration.zero, index: i); // re-request fresh URL
           if (_player.playing) _player.play();
           return;

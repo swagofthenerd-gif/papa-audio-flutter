@@ -100,6 +100,10 @@ class YtStream {
   // googlevideo stalls/times out connections whose user-agent doesn't match
   // the client that minted the URL — every fetch of [url] must send this UA.
   final String userAgent;
+  // The innertube client identity that minted this URL (e.g. ANDROID_MUSIC,
+  // ANDROID_VR, IOS). Used to steer a retry away from a client whose URL turned
+  // out to be length-capped (the "plays ~1 min then stalls" failure).
+  final String client;
   const YtStream({
     required this.url,
     required this.mime,
@@ -107,6 +111,7 @@ class YtStream {
     required this.bitrate,
     required this.expiresAt,
     required this.userAgent,
+    this.client = '',
   });
 
   bool get fresh => DateTime.now().isBefore(expiresAt);

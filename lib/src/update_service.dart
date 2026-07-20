@@ -45,8 +45,15 @@ class UpdateService extends ChangeNotifier {
   String? lastError;
   bool _checked = false;
 
-  /// Fetch the latest release and, if newer than [kAppBuildNumber], expose it
-  /// via [available]. Runs at most once per app session; silent on failure.
+  /// Fetch releases and, if any has a higher build than [kAppBuildNumber],
+  /// expose the highest one via [available]. Runs at most once per app session;
+  /// silent on failure.
+  ///
+  /// NB: we deliberately do NOT use `/releases/latest`. That endpoint sorts by
+  /// `created_at`, and CI-published releases can inherit an older tag/commit
+  /// date than a hand-made release — so `/latest` may point at an older build
+  /// than one that exists. Listing all releases and taking the max tag number
+  /// is robust against that ordering quirk.
   Future<void> checkForUpdate({bool force = false}) async {
     if (_checked && !force) return;
     _checked = true;
@@ -54,7 +61,8 @@ class UpdateService extends ChangeNotifier {
     try {
       final resp = await http
           .get(
-            Uri.parse('https://api.github.com/repos/$_repo/releases/latest'),
+            Uri.parse(
+                'https://api.github.com/repos/$_repo/releases?per_page=30'),
             headers: {'Accept': 'application/vnd.github+json'},
           )
           .timeout(const Duration(seconds: 12));
@@ -64,11 +72,23 @@ class UpdateService extends ChangeNotifier {
             : 'Update check failed (HTTP ${resp.statusCode}).';
         return;
       }
-      final json = jsonDecode(resp.body) as Map<String, dynamic>;
-      final tag = (json['tag_name'] ?? '').toString();
-      final build = int.tryParse(tag.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-      if (build <= kAppBuildNumber) return;
-      final assets = (json['assets'] as List?) ?? const [];
+      final releases = (jsonDecode(resp.body) as List).whereType<Map>();
+      // Pick the release with the highest build number (parsed from its tag)
+      // that isn't a draft/prerelease.
+      Map? best;
+      var bestBuild = kAppBuildNumber;
+      for (final r in releases) {
+        if (r['draft'] == true || r['prerelease'] == true) continue;
+        final tag = (r['tag_name'] ?? '').toString();
+        final build = int.tryParse(tag.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+        if (build > bestBuild) {
+          bestBuild = build;
+          best = r;
+        }
+      }
+      if (best == null) return; // already on the newest build
+      final tag = (best['tag_name'] ?? '').toString();
+      final assets = (best['assets'] as List?) ?? const [];
       final apk = assets.whereType<Map>().firstWhere(
             (a) => (a['name'] ?? '').toString().toLowerCase().endsWith('.apk'),
             orElse: () => const {},
@@ -79,9 +99,9 @@ class UpdateService extends ChangeNotifier {
         return;
       }
       available = UpdateInfo(
-        buildNumber: build,
+        buildNumber: bestBuild,
         versionName: tag.replaceFirst(RegExp(r'^v'), ''),
-        notes: (json['body'] ?? '').toString().trim(),
+        notes: (best['body'] ?? '').toString().trim(),
         apkUrl: apkUrl,
         sizeBytes: (apk['size'] as num?)?.toInt(),
       );

@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+8
+version: 1.0.0+9
 
 environment:
   sdk: '>=3.9.0 <4.0.0'
@@ -54,6 +54,11 @@ dependencies:
   # Optional video playback: the player's "show video" toggle plays a muxed
   # YouTube stream (its own audio) while just_audio is paused. Audio-first.
   video_player: ^2.9.2
+  # Robust stream-URL resolution: deciphers the signature + the `n` throttling
+  # parameter, so googlevideo serves full-speed, full-length audio. Used as the
+  # primary resolver; the hand-rolled innertube extractor is the fallback. This
+  # is what fixes YouTube audio stalling after a few seconds.
+  youtube_explode_dart: ^2.3.6
 
 dev_dependencies:
   flutter_test:

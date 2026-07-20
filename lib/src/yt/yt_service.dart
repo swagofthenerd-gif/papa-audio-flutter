@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yte;
 
 import '../db.dart';
 import 'innertube.dart';
@@ -145,6 +146,7 @@ class YtService extends ChangeNotifier {
   @override
   void dispose() {
     tube.dispose();
+    resolver.dispose();
     super.dispose();
   }
 }
@@ -163,6 +165,16 @@ class YtStreamResolver {
   // out capped mid-stream. Consumed once so a later fresh attempt is unbiased.
   final Map<String, String> _avoidNext = {};
 
+  // youtube_explode deciphers the signature + `n` throttling param, so its URLs
+  // stream at full speed and full length. Lazily created; closed on dispose.
+  yte.YoutubeExplode? _yt;
+  yte.YoutubeExplode get _explode => _yt ??= yte.YoutubeExplode();
+
+  // A modern desktop UA to accompany fetches of youtube_explode URLs.
+  static const _webUa =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
   /// The client that minted the currently-cached stream for [videoId], if any.
   String? clientFor(String videoId) => _cache[videoId]?.client;
 
@@ -175,7 +187,7 @@ class YtStreamResolver {
     }
     final pending = _inFlight[videoId];
     if (pending != null) return pending;
-    final future = tube.playerStream(videoId, avoid: avoid).then((s) {
+    final future = _fetch(videoId, avoid).then((s) {
       _cache[videoId] = s;
       while (_cache.length > _cap) {
         _cache.remove(_cache.keys.first); // evict least-recently-used
@@ -184,6 +196,39 @@ class YtStreamResolver {
     }).whenComplete(() => _inFlight.remove(videoId));
     _inFlight[videoId] = future;
     return future;
+  }
+
+  /// Resolve a stream URL. Primary path: youtube_explode (deciphered,
+  /// un-throttled). Fallback: the hand-rolled innertube extractor.
+  Future<YtStream> _fetch(String videoId, String? avoid) async {
+    if (avoid != 'EXPLODE') {
+      try {
+        final manifest = await _explode.videos.streamsClient
+            .getManifest(videoId)
+            .timeout(const Duration(seconds: 20));
+        final a = manifest.audioOnly.withHighestBitrate();
+        return YtStream(
+          url: a.url.toString(),
+          mime: a.codec.mimeType,
+          contentLength: a.size.totalBytes,
+          bitrate: a.bitrate.bitsPerSecond.toInt(),
+          expiresAt: DateTime.now().add(const Duration(hours: 5)),
+          userAgent: _webUa,
+          client: 'EXPLODE',
+        );
+      } catch (e) {
+        debugPrint('[yt] explode resolve failed for $videoId: $e — '
+            'falling back to innertube');
+      }
+    }
+    // Innertube fallback (or when explicitly avoiding EXPLODE after a failure).
+    return tube.playerStream(videoId,
+        avoid: avoid == 'EXPLODE' ? null : avoid);
+  }
+
+  void dispose() {
+    _yt?.close();
+    _yt = null;
   }
 
   /// Drop a cached stream so the next resolve re-fetches a fresh URL. Used when

@@ -91,16 +91,20 @@ class UpdateService extends ChangeNotifier {
     final file = File('${updatesDir.path}/papa-audio-${info.buildNumber}.apk');
 
     final client = http.Client();
+    IOSink? sink;
     try {
       final req = http.Request('GET', Uri.parse(info.apkUrl));
-      final resp = await client.send(req);
+      final resp =
+          await client.send(req).timeout(const Duration(seconds: 30));
       if (resp.statusCode != 200) {
         throw 'Download failed (HTTP ${resp.statusCode})';
       }
       final total = resp.contentLength ?? info.sizeBytes ?? 0;
       var received = 0;
-      final sink = file.openWrite();
-      await for (final chunk in resp.stream) {
+      sink = file.openWrite();
+      // A stalled connection mid-body must not hang the updater forever.
+      await for (final chunk
+          in resp.stream.timeout(const Duration(seconds: 60))) {
         sink.add(chunk);
         received += chunk.length;
         if (total > 0) {
@@ -108,13 +112,21 @@ class UpdateService extends ChangeNotifier {
           notifyListeners();
         }
       }
+      await sink.flush();
       await sink.close();
+      sink = null;
     } finally {
+      // On any failure: close the sink, reset progress so the dialog isn't
+      // stuck, and free the socket. (installApk below only runs on success —
+      // a thrown error skips past it.)
+      try {
+        await sink?.close();
+      } catch (_) {}
       client.close();
+      downloadProgress = null;
+      notifyListeners();
     }
 
-    downloadProgress = null;
-    notifyListeners();
     await _ch.invokeMethod('installApk', {'path': file.path});
   }
 

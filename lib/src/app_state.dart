@@ -2,19 +2,27 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'art_color.dart';
+import 'audio_format.dart';
 import 'bridge.dart';
 import 'db.dart';
 import 'downloads.dart';
 import 'history.dart';
+import 'listenbrainz.dart';
 import 'lyrics.dart';
 import 'local_library.dart';
 import 'models.dart';
 import 'player_service.dart';
 import 'playlists.dart';
 import 'queues_store.dart';
+import 'recommendations.dart';
+import 'update_service.dart';
 import 'selection.dart';
 import 'settings.dart';
 import 'waveform.dart';
+import 'yt/yt_auth.dart';
+import 'yt/yt_models.dart';
+import 'yt/yt_service.dart';
+import 'yt/yt_video.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
 /// on purpose — screens read exactly what they need and rebuild narrowly.
@@ -27,11 +35,22 @@ class AppState extends ChangeNotifier {
   final DownloadManager downloads = DownloadManager();
   final PlaylistsService playlists = PlaylistsService();
   final HistoryService history = HistoryService();
+  late final ListenBrainzService listenBrainz = ListenBrainzService(
+    tokenProvider: () => settings.listenBrainzToken,
+    enabledProvider: () => settings.scrobbleEnabled,
+  );
   final SettingsService settings = SettingsService();
   final QueuesStore queues = QueuesStore();
+  final RecommendationService recommendations = RecommendationService();
+  final UpdateService updates = UpdateService();
+  final YtAuth ytAuth = YtAuth();
+  late final YtService yt = YtService(ytAuth);
+  late final YtVideoController ytVideo = YtVideoController(yt.tube);
   final TrackSelection selection = TrackSelection();
   late final ArtColorService artColors =
       ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));
+  late final AudioFormatService audioFormats =
+      AudioFormatService(resolveYt: (id) => yt.resolver.resolve(id));
   LyricsService? lyrics; // created once the DB is open
   WaveformService? waveforms;
 
@@ -92,6 +111,11 @@ class AppState extends ChangeNotifier {
       settingsFuture,
       downloadsFuture,
     ]);
+    // Scrobble to ListenBrainz when a play counts as a listen (respects the
+    // user's listen threshold, which matches scrobble conventions).
+    history.onListenRecorded = (t) => listenBrainz.listen(t);
+    // "Now playing" ping on every track change.
+    playerService.onTrackStart = (t) => listenBrainz.playingNow(t);
     history.listenSecondsProvider = () => settings.listenSeconds;
     history.thresholdProvider = (t) {
       if (settings.listenPercentMode && t.duration > 0) {
@@ -101,6 +125,10 @@ class AppState extends ChangeNotifier {
       return t.duration > 0 ? want.clamp(0, t.duration * 0.5) : want;
     };
     playerService.onNewQueue = queues.record;
+    // YouTube Music: auth + feed cache load, and on-device stream resolution.
+    await ytAuth.init(db);
+    playerService.ytResolver = yt.resolver;
+    yt.init(db); // fire-and-forget; home paints from cache, refreshes behind
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence(db);
     if (bridge.configured) await loadLibrary();
@@ -177,7 +205,72 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Play a single YouTube result, streamed through the bridge.
+  /// Resolve the player's saved resume points into playable "Jump back in"
+  /// cards. Only collections we can reconstruct from current in-memory data are
+  /// returned (albums / local albums / playlists); others are skipped.
+  Future<List<JumpBackItem>> jumpBackIn({int limit = 8}) async {
+    final rows = await playerService.recentCollections(limit: limit * 2);
+    final out = <JumpBackItem>[];
+    for (final r in rows) {
+      final cid = r.collectionId;
+      String? title, artUri, artPath;
+      List<Track>? tracks;
+      if (cid.startsWith('palbum:')) {
+        final id = cid.substring(7);
+        final a = albums.where((x) => x.id == id).firstOrNull;
+        if (a != null) {
+          title = a.name;
+          tracks = a.tracks;
+          artPath = a.artPath;
+        }
+      } else if (cid.startsWith('lalbum:')) {
+        final id = int.tryParse(cid.substring(7));
+        final a =
+            localLibrary.albums.where((x) => x.albumId == id).firstOrNull;
+        if (a != null) {
+          title = a.name;
+          tracks = a.tracks;
+          artUri = 'localart://${a.artTrackId}/${a.albumId}';
+        }
+      } else if (cid.startsWith('playlist:')) {
+        final id = cid.substring(9);
+        final p = playlists.playlists.where((x) => x.id == id).firstOrNull;
+        if (p != null && p.tracks.isNotEmpty) {
+          title = p.name;
+          tracks = p.tracks;
+          artUri = p.tracks.first.artUri;
+          artPath = p.tracks.first.artPath;
+        }
+      }
+      if (title == null || tracks == null || tracks.isEmpty) continue;
+      final idx = r.index.clamp(0, tracks.length - 1);
+      out.add(JumpBackItem(
+        collectionId: cid,
+        title: title,
+        subtitle: r.trackTitle ?? tracks[idx].title,
+        artUri: artUri ?? tracks[idx].artUri,
+        artPath: artPath ?? tracks[idx].artPath,
+        tracks: tracks,
+        index: idx,
+        positionMs: r.positionMs,
+      ));
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /// Resume a "Jump back in" card at its saved track and position.
+  Future<void> resumeJumpBack(JumpBackItem item) => playerService.playQueue(
+      item.tracks, item.index,
+      collectionId: item.collectionId,
+      startPosition: Duration(milliseconds: item.positionMs));
+
+  /// Play a generated mix as a fresh (non-collection) queue.
+  Future<void> playMix(List<Track> tracks) =>
+      playerService.playQueue(tracks, 0);
+
+  /// Play a single YouTube result. Streams on-device (lazy extraction); the
+  /// null sourceUri routes it through YtLazyAudioSource in the player.
   Future<void> playYt(YtResult v) {
     final t = Track(
       id: 'yt:${v.id}',
@@ -185,9 +278,100 @@ class AppState extends ChangeNotifier {
       artist: v.channel.isEmpty ? 'YouTube' : v.channel,
       filePath: '',
       duration: (v.durationSec ?? 0).toDouble(),
-      sourceUri: bridge.ytStreamUrl(v.id),
       artUri: v.thumbnail,
     );
-    return playerService.playQueue([t], 0);
+    return playYtTrack(t);
   }
+
+  /// Play a YT track and quietly grow the queue into its radio: related tracks
+  /// append behind it, so playback continues like YT Music's autoplay.
+  Future<void> playYtTrack(Track t) async {
+    await playerService.playQueue([t], 0);
+    final id = t.id.startsWith('yt:') ? t.id.substring(3) : t.id;
+    try {
+      final related = await yt.tube.related(id);
+      // The user may have moved on while we fetched — only extend if this
+      // track still owns the queue.
+      if (playerService.currentTrack?.id != t.id) return;
+      var added = 0;
+      for (final item in related) {
+        final rt = item.toTrack();
+        if (rt == null || rt.id == t.id) continue;
+        await playerService.addToQueue(rt);
+        if (++added >= 20) break;
+      }
+    } catch (_) {} // radio is a bonus — the tapped track already plays
+  }
+
+  /// Play any YT Music item: songs start radio; albums/playlists/artists fetch
+  /// their tracks and replace the queue.
+  Future<void> playYtItem(YtMusicItem item) async {
+    final t = item.toTrack();
+    if (t != null) return playYtTrack(t);
+    final shelves = item.playlistId != null
+        ? await yt.tube.playlist(item.playlistId!)
+        : item.browseId != null
+            ? await yt.tube.browsePage(item.browseId!)
+            : const <YtShelf>[];
+    final tracks = <Track>[];
+    final seen = <String>{};
+    for (final s in shelves) {
+      for (final i in s.items) {
+        final rt = i.toTrack();
+        if (rt != null && seen.add(rt.id)) tracks.add(rt);
+      }
+    }
+    if (tracks.isNotEmpty) await playerService.playQueue(tracks, 0);
+  }
+
+  /// Resolve a YT playlist/album to its tracks (deduped, in order).
+  Future<List<Track>> ytItemTracks(YtMusicItem item) async {
+    final shelves = item.playlistId != null
+        ? await yt.tube.playlist(item.playlistId!)
+        : item.browseId != null
+            ? await yt.tube.browsePage(item.browseId!)
+            : const <YtShelf>[];
+    final tracks = <Track>[];
+    final seen = <String>{};
+    for (final s in shelves) {
+      for (final i in s.items) {
+        final rt = i.toTrack();
+        if (rt != null && seen.add(rt.id)) tracks.add(rt);
+      }
+    }
+    return tracks;
+  }
+
+  /// Import a YT playlist/album into a local playlist so it lives in the
+  /// library (and works offline once its tracks are downloaded). Returns the
+  /// created playlist, or null if it had no playable tracks.
+  Future<Playlist?> importYtPlaylist(YtMusicItem item) async {
+    final tracks = await ytItemTracks(item);
+    if (tracks.isEmpty) return null;
+    final pl = await playlists.create(item.title);
+    await playlists.addTracks(pl, tracks);
+    return pl;
+  }
+}
+
+/// A resolved home "Jump back in" card.
+class JumpBackItem {
+  final String collectionId;
+  final String title;
+  final String subtitle;
+  final String? artUri;
+  final String? artPath;
+  final List<Track> tracks;
+  final int index;
+  final int positionMs;
+  const JumpBackItem({
+    required this.collectionId,
+    required this.title,
+    required this.subtitle,
+    this.artUri,
+    this.artPath,
+    required this.tracks,
+    required this.index,
+    required this.positionMs,
+  });
 }

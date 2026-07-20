@@ -4,9 +4,12 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../settings.dart';
 import '../theme.dart';
+import '../version.dart';
+import '../yt/yt_login_screen.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
 import 'stats_screen.dart';
+import 'update_dialog.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -25,6 +28,36 @@ class SettingsScreen extends StatelessWidget {
         builder: (context, _) => ListView(
           padding: const EdgeInsets.only(bottom: 40),
           children: [
+            const _Section('YouTube Music'),
+            AnimatedBuilder(
+              animation: s.ytAuth,
+              builder: (context, _) => ListTile(
+                leading: Icon(
+                    s.ytAuth.signedIn
+                        ? Icons.account_circle
+                        : Icons.account_circle_outlined,
+                    color: s.ytAuth.signedIn ? PA.accent : PA.textSecondary),
+                title: Text(s.ytAuth.signedIn ? 'Signed in' : 'Sign in'),
+                subtitle: Text(
+                    s.ytAuth.signedIn
+                        ? 'Personalized mixes & recommendations are on'
+                        : 'Connect your account for personalized recommendations',
+                    style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+                trailing: s.ytAuth.signedIn
+                    ? TextButton(
+                        onPressed: () async {
+                          await s.ytAuth.signOut();
+                          await s.yt.onAuthChanged();
+                        },
+                        child: const Text('Sign out'),
+                      )
+                    : const Icon(Icons.chevron_right, color: PA.textSecondary),
+                onTap: s.ytAuth.signedIn
+                    ? null
+                    : () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const YtLoginScreen())),
+              ),
+            ),
             const _Section('Playback'),
             ListTile(
               leading: const Icon(Icons.equalizer, color: PA.textSecondary),
@@ -100,6 +133,16 @@ class SettingsScreen extends StatelessWidget {
                   style: TextStyle(color: PA.textMuted, fontSize: 12)),
               value: st.dynamicColors,
               onChanged: (v) => st.update(() => st.dynamicColors = v),
+            ),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
+              secondary:
+                  const Icon(Icons.contrast, color: PA.textSecondary),
+              title: const Text('AMOLED black'),
+              subtitle: const Text('Pure-black backgrounds for OLED screens',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.amoled,
+              onChanged: (v) => st.update(() => st.amoled = v),
             ),
             SwitchListTile(
               activeThumbColor: PA.accent,
@@ -346,10 +389,137 @@ class SettingsScreen extends StatelessWidget {
                     const Text('Change', style: TextStyle(color: PA.accent)),
               ),
             ),
+            const _Section('Scrobbling'),
+            SwitchListTile(
+              activeThumbColor: PA.accent,
+              secondary:
+                  const Icon(Icons.graphic_eq, color: PA.textSecondary),
+              title: const Text('ListenBrainz'),
+              subtitle: const Text('Submit your listens to listenbrainz.org',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              value: st.scrobbleEnabled,
+              onChanged: (v) => st.update(() => st.scrobbleEnabled = v),
+            ),
+            if (st.scrobbleEnabled)
+              ListTile(
+                leading: const Icon(Icons.key, color: PA.textSecondary),
+                title: const Text('User token'),
+                subtitle: Text(
+                    st.listenBrainzToken.isEmpty
+                        ? 'Tap to paste your token (listenbrainz.org → Settings)'
+                        : 'Token set · tap to change or test',
+                    style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+                trailing: st.listenBrainzToken.isEmpty
+                    ? null
+                    : const Icon(Icons.check_circle,
+                        color: PA.accent, size: 18),
+                onTap: () => _editListenBrainzToken(context, s),
+              ),
+            const _Section('About'),
+            ListTile(
+              leading:
+                  const Icon(Icons.system_update, color: PA.textSecondary),
+              title: const Text('Check for updates'),
+              subtitle: Text('Version $kAppVersionName (build $kAppBuildNumber)',
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+              onTap: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                await s.updates.checkForUpdate(force: true);
+                if (!context.mounted) return;
+                if (s.updates.available != null) {
+                  showUpdateDialog(context, s.updates);
+                } else {
+                  final err = s.updates.lastError;
+                  messenger.showSnackBar(SnackBar(
+                      content: Text(err ?? 'You’re on the latest version'),
+                      duration: Duration(
+                          milliseconds: err != null ? 3500 : 1500)));
+                }
+              },
+            ),
           ],
         ),
       ),
     );
+  }
+}
+
+Future<void> _editListenBrainzToken(BuildContext context, AppState s) async {
+  final ctrl = TextEditingController(text: s.settings.listenBrainzToken);
+  final result = await showDialog<String>(
+    context: context,
+    builder: (ctx) {
+      String? status;
+      bool testing = false;
+      return StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          backgroundColor: PA.surfaceElevated,
+          title: const Text('ListenBrainz token', style: TextStyle(fontSize: 17)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'Paste your token from listenbrainz.org → Settings.',
+                  style: TextStyle(color: PA.textMuted, fontSize: 12)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                style: const TextStyle(fontSize: 13),
+                decoration: const InputDecoration(
+                  hintText: 'Token',
+                  filled: true,
+                  fillColor: PA.card,
+                  border: OutlineInputBorder(borderSide: BorderSide.none),
+                ),
+              ),
+              if (status != null) ...[
+                const SizedBox(height: 10),
+                Text(status!,
+                    style: TextStyle(
+                        color: status!.startsWith('Valid')
+                            ? PA.accent
+                            : PA.error,
+                        fontSize: 12)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: testing
+                  ? null
+                  : () async {
+                      setDialog(() {
+                        testing = true;
+                        status = 'Checking…';
+                      });
+                      final ok = await s.listenBrainz.validate(ctrl.text);
+                      setDialog(() {
+                        testing = false;
+                        status = ok ? 'Valid token ✓' : 'Invalid token';
+                      });
+                    },
+              child: const Text('Test', style: TextStyle(color: PA.accent)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel',
+                  style: TextStyle(color: PA.textSecondary)),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: PA.accent, foregroundColor: Colors.black),
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  if (result != null) {
+    s.settings.update(() => s.settings.listenBrainzToken = result);
   }
 }
 

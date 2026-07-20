@@ -2,10 +2,15 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player/video_player.dart';
 
+import '../../main.dart' show Shell;
 import '../app_state.dart';
+import '../audio_format.dart';
 import '../lyrics.dart';
 import '../models.dart';
 import '../player_service.dart';
@@ -27,61 +32,210 @@ class PlayerSheet extends StatefulWidget {
 
   static const miniHeight = 62.0;
 
+  /// Registered by the live sheet state. Returns true when it consumed a
+  /// back press (closed the queue panel or collapsed the expanded player).
+  /// The Shell's single PopScope calls this first — the sheet must NOT have
+  /// its own PopScope, or one back press would trigger both handlers.
+  static bool Function()? backHandler;
+
   @override
   State<PlayerSheet> createState() => _PlayerSheetState();
 }
 
 class _PlayerSheetState extends State<PlayerSheet>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 380),
-  )..addStatusListener((_) => setState(() {}));
+  )
+    ..addStatusListener((_) => setState(() {}))
+    ..addListener(_syncImmersive);
+
+  bool _immersive = false;
+
+  /// Hide the status bar while the player is (near) fully expanded, restore it
+  /// as it collapses — the artwork gets the top of the screen. Only the top
+  /// bar is hidden (nav bar stays for the queue drag), which avoids Android's
+  /// intrusive "swipe down to exit" immersive banner.
+  void _syncImmersive() {
+    final want = _c.value > 0.9;
+    if (want == _immersive) return;
+    _immersive = want;
+    SystemChrome.setEnabledSystemUIMode(
+      want ? SystemUiMode.manual : SystemUiMode.edgeToEdge,
+      overlays: want ? const [SystemUiOverlay.bottom] : SystemUiOverlay.values,
+    );
+  }
+
+  /// In-player queue panel position (0 hidden → 1 open). Dragging up while
+  /// expanded pulls it in, Namida-style.
+  late final AnimationController _q = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+  );
+  bool _qDragging = false;
 
   double get t => _c.value;
   bool get expanded => t > 0.5;
+
+  /// Critically-damped spring settle that carries the finger's release
+  /// velocity — this is what makes flings feel continuous instead of snapping
+  /// to a canned tween.
+  static void _spring(AnimationController c, double target, double velocity) {
+    c.animateWith(SpringSimulation(
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 420, ratio: 1.0),
+      c.value,
+      target,
+      velocity,
+    ));
+  }
 
   /// Lyrics view replaces the artwork while on (toggled by double-tap or the
   /// lyrics button). Lives here so the morphing artwork can hide with it.
   final ValueNotifier<bool> lyricsOn = ValueNotifier(false);
 
+  /// Video overlay on (YouTube tracks only). Playing a muxed stream through the
+  /// video engine while just_audio is paused — see YtVideoController.
+  final ValueNotifier<bool> videoOn = ValueNotifier(false);
+
   Color? _artColor; // dominant artwork color for the expanded background
   String? _artColorKey;
 
+  // Animated color cross-fade on track change: _artColorShown chases
+  // _artColor so the background glides between palettes instead of snapping.
+  Color? _artColorShown;
+  late final AnimationController _colorC = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 450));
+  ColorTween? _colorTween;
+
+  void _animateArtColor(Color? to) {
+    _colorTween = ColorTween(begin: _artColorShown, end: to);
+    _colorC
+      ..reset()
+      ..forward();
+  }
+
+  /// Toggle the video overlay for the current YouTube track. Pauses audio and
+  /// hands off to the video engine; toggling off resumes audio at the video's
+  /// position.
+  Future<void> _toggleVideo(String videoId) async {
+    final s = context.read<AppState>();
+    if (videoOn.value) {
+      videoOn.value = false;
+      s.playerService.videoActive = false;
+      final at = await s.ytVideo.close();
+      await s.playerService.resumeFromVideo(at);
+    } else {
+      videoOn.value = true;
+      final at = await s.playerService.suspendForVideo();
+      // While video owns playback, route the transport play/pause to it.
+      s.playerService
+        ..videoActive = true
+        ..onVideoPlayPause = () {
+          final c = s.ytVideo.controller;
+          if (c == null) return;
+          c.value.isPlaying ? c.pause() : c.play();
+        };
+      await s.ytVideo.open(videoId, fromSec: at);
+      if (s.ytVideo.error != null && mounted) {
+        // Couldn't resolve a video stream — fall back to audio.
+        videoOn.value = false;
+        s.playerService.videoActive = false;
+        await s.playerService.resumeFromVideo(at);
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Video unavailable for this track')));
+      }
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    PlayerSheet.backHandler = () {
+      if (_q.value > 0.05) {
+        _spring(_q, 0, -4); // back closes the queue panel first
+        return true;
+      }
+      if (expanded) {
+        _spring(_c, 0, -3);
+        return true;
+      }
+      return false;
+    };
+  }
+
   @override
   void dispose() {
+    if (PlayerSheet.backHandler != null) PlayerSheet.backHandler = null;
+    if (_immersive) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge,
+          overlays: SystemUiOverlay.values);
+    }
     lyricsOn.dispose();
+    videoOn.dispose();
     _c.dispose();
+    _q.dispose();
+    _colorC.dispose();
     super.dispose();
   }
 
   void _updateArtColor(BuildContext context, Track track) {
     if (_artColorKey == track.key) return;
+    // Track changed (e.g. user skipped) — tear down any video overlay so it
+    // can't play the wrong clip, and resume audio for the new track.
+    if (videoOn.value) {
+      videoOn.value = false;
+      final s = context.read<AppState>();
+      s.playerService.videoActive = false;
+      s.ytVideo.close();
+      s.playerService.resumeFromVideo(0);
+    }
     _artColorKey = track.key;
     final s = context.read<AppState>();
     if (!s.settings.dynamicColors) {
       _artColor = null;
+      _animateArtColor(null);
       return;
     }
     s.artColors.forTrack(track).then((c) {
       if (mounted && _artColorKey == track.key) {
-        setState(() => _artColor = c);
+        setState(() {
+          _artColor = c;
+          _animateArtColor(c);
+        });
       }
     });
   }
 
   // ── Vertical drag: the sheet follows the finger, then springs ──────────────
+  // While fully expanded, an upward drag (or any drag with the queue panel
+  // already out) is routed to the queue panel instead of the sheet.
 
-  void _onVDragUpdate(DragUpdateDetails d, double travel) {
+  void _onVDragUpdate(DragUpdateDetails d, double travel, double qTravel) {
+    if (_qDragging || _q.value > 0.001 || (t > 0.999 && d.delta.dy < 0)) {
+      _qDragging = true;
+      _q.value = (_q.value - d.delta.dy / qTravel).clamp(0.0, 1.0);
+      return;
+    }
     _c.value -= d.delta.dy / travel;
   }
 
-  void _onVDragEnd(DragEndDetails d, double travel) {
+  void _onVDragEnd(DragEndDetails d, double travel, double qTravel) {
+    if (_qDragging) {
+      _qDragging = false;
+      final fling = -d.velocity.pixelsPerSecond.dy / qTravel;
+      final target =
+          fling.abs() > 0.7 ? (fling > 0 ? 1.0 : 0.0) : (_q.value > 0.5 ? 1.0 : 0.0);
+      HapticFeedback.selectionClick();
+      _spring(_q, target, fling);
+      return;
+    }
     final fling = -d.velocity.pixelsPerSecond.dy / travel;
+    HapticFeedback.selectionClick(); // snap tick, Namida-style
     if (fling.abs() > 0.7) {
-      _c.fling(velocity: fling);
+      _spring(_c, fling > 0 ? 1.0 : 0.0, fling);
     } else {
-      _c.fling(velocity: t > 0.5 ? 2.2 : -2.2);
+      _spring(_c, t > 0.5 ? 1.0 : 0.0, fling);
     }
   }
 
@@ -97,7 +251,10 @@ class _PlayerSheetState extends State<PlayerSheet>
           return const SizedBox.shrink();
         }
         final size = MediaQuery.sizeOf(context);
-        final topInset = MediaQuery.paddingOf(context).top;
+        // Floor the top inset: immersive mode (expanded) reports 0, which
+        // would jump the header up and shift the artwork morph target. A
+        // stable minimum keeps the layout put across the transition.
+        final topInset = math.max(MediaQuery.paddingOf(context).top, 24.0);
         final collapsedTop = size.height - widget.navHeight - PlayerSheet.miniHeight;
         final travel = collapsedTop; // distance between the two states
         // Artwork side: capped by width AND by what the column below it needs
@@ -105,7 +262,7 @@ class _PlayerSheetState extends State<PlayerSheet>
         // NEVER overflows on short screens — the art shrinks instead.
         final fullSide = math.min(
           (size.width - 48).clamp(0.0, 380.0),
-          (size.height - topInset - 420).clamp(140.0, 380.0),
+          (size.height - topInset - 494).clamp(140.0, 380.0),
         );
 
         // Heavy subtrees are built ONCE here (per track/stream event). The
@@ -119,9 +276,73 @@ class _PlayerSheetState extends State<PlayerSheet>
           topInset: topInset,
           artSide: fullSide,
           lyricsOn: lyricsOn,
-          onCollapse: () => _c.fling(velocity: -2.2),
+          videoOn: videoOn,
+          onToggleVideo: _toggleVideo,
+          onCollapse: () => _spring(_c, 0, -3),
+          onQueue: () => _spring(_q, 1, 4),
         );
         final miniBar = _MiniBar(ps: ps, track: track);
+        // Swipeable artwork carousel — mounted only while fully expanded so
+        // the morphing single-art keeps owning every in-between frame.
+        final carousel = _ArtCarousel(
+          ps: ps,
+          track: track,
+          side: fullSide,
+          lyricsOn: lyricsOn,
+          glow: _artColor,
+        );
+        // Pseudo-blur backdrop: a tiny decode stretched full-screen; bilinear
+        // upscaling reads as a blur at near-zero cost (no ImageFiltered).
+        final bgArt = IgnorePointer(
+          child: RepaintBoundary(
+            child: FittedBox(
+            fit: BoxFit.cover,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              width: 60,
+              height: 60,
+              child: TrackArt(
+                artUri: track.artUri,
+                artPath: track.artPath,
+                size: 60,
+                radius: 0,
+                px: 32,
+              ),
+            ),
+          ),
+          ),
+        );
+        final qHeight = size.height * 0.68;
+        // Built ONCE per stream event — the per-frame builder only positions
+        // it. Rebuilding a ReorderableListView every drag frame is jank.
+        final queuePanel = Material(
+          color: PA.surface,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(16)),
+          clipBehavior: Clip.antiAlias,
+          elevation: 8,
+          child: Column(
+            children: [
+              // Grab handle — also a tap target to close.
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _spring(_q, 0, -4),
+                child: Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 8, bottom: 2),
+                    decoration: BoxDecoration(
+                      color: PA.textMuted,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(child: QueuePanel(ps: ps)),
+            ],
+          ),
+        );
         final art = IgnorePointer(
           child: SizedBox(
             width: fullSide,
@@ -141,14 +362,10 @@ class _PlayerSheetState extends State<PlayerSheet>
         final fullRect = Rect.fromLTWH(
             (size.width - fullSide) / 2, topInset + 56, fullSide, fullSide);
 
-        return PopScope(
-          canPop: !expanded,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _c.fling(velocity: -2.2);
-          },
-          child: AnimatedBuilder(
-            animation: _c,
-            builder: (context, _) {
+        return AnimatedBuilder(
+          animation: Listenable.merge([_c, _q, _colorC]),
+          builder: (context, _) {
+              _artColorShown = _colorTween?.evaluate(_colorC) ?? _artColor;
               final top = collapsedTop * (1 - t);
               // Collapsed, the sheet is ONLY the mini strip (the nav bar stays
               // visible and tappable below it); expanded it fills the screen.
@@ -166,33 +383,68 @@ class _PlayerSheetState extends State<PlayerSheet>
                     bottom: bottom,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: t < 0.1 ? () => _c.fling(velocity: 2.2) : null,
-                      onVerticalDragUpdate: (d) => _onVDragUpdate(d, travel),
-                      onVerticalDragEnd: (d) => _onVDragEnd(d, travel),
+                      onTap: t < 0.1 ? () => _spring(_c, 1, 3) : null,
+                      onVerticalDragUpdate: (d) =>
+                          _onVDragUpdate(d, travel, qHeight),
+                      onVerticalDragEnd: (d) =>
+                          _onVDragEnd(d, travel, qHeight),
                       child: Container(
                         decoration: BoxDecoration(
-                          // Expanded background tints toward the artwork's
-                          // dominant color (subtle — Spotify-dark stays boss).
-                          color: Color.lerp(
-                              PA.surfaceElevated,
-                              _artColor != null
-                                  ? Color.lerp(
-                                      PA.background, _artColor, 0.38)!
-                                  : PA.background,
-                              t),
+                          // Expanded background: top-weighted gradient from
+                          // the artwork's dominant color fading into the app
+                          // background — Namida/Spotify style. The color
+                          // itself cross-fades on track change (_colorC).
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            stops: const [0.0, 0.55, 1.0],
+                            colors: [
+                              Color.lerp(
+                                  PA.surfaceElevated,
+                                  _artColorShown != null
+                                      ? Color.lerp(PA.background,
+                                          _artColorShown, 0.55)!
+                                      : PA.background,
+                                  t)!,
+                              Color.lerp(
+                                  PA.surfaceElevated,
+                                  _artColorShown != null
+                                      ? Color.lerp(PA.background,
+                                          _artColorShown, 0.22)!
+                                      : PA.background,
+                                  t)!,
+                              Color.lerp(
+                                  PA.surfaceElevated, PA.background, t)!,
+                            ],
+                          ),
                           borderRadius: BorderRadius.vertical(
                               top: Radius.circular(
                                   12 * (1 - t) + 16 * t * (1 - t))),
                         ),
                         child: Stack(
                           children: [
+                            // Blurry artwork backdrop under everything (only
+                            // near-expanded, faded in over the last 10%).
+                            if (t > 0.9)
+                              Positioned.fill(
+                                child: Opacity(
+                                  opacity:
+                                      0.28 * ((t - 0.9) / 0.1).clamp(0.0, 1.0),
+                                  child: bgArt,
+                                ),
+                              ),
                             if (fullOpacity > 0)
                               Positioned.fill(
                                 child: Opacity(
                                   opacity: fullOpacity,
                                   child: IgnorePointer(
                                     ignoring: fullOpacity < 0.4,
-                                    child: fullPlayer,
+                                    // Parallax: content settles up into place
+                                    // slightly behind the sheet itself.
+                                    child: Transform.translate(
+                                      offset: Offset(0, (1 - t) * 40),
+                                      child: fullPlayer,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -218,17 +470,64 @@ class _PlayerSheetState extends State<PlayerSheet>
                               rect: artRect,
                               child: ValueListenableBuilder<bool>(
                                 valueListenable: lyricsOn,
-                                builder: (_, lyr, child) => Opacity(
-                                    opacity: lyr && t > 0.5 ? 0 : 1,
-                                    child: child),
-                                child: ClipRRect(
-                                  borderRadius:
-                                      BorderRadius.circular(4 + 6 * t),
-                                  child: FittedBox(
-                                      fit: BoxFit.fill, child: art),
+                                builder: (_, lyr, child) {
+                                  if (lyr && t > 0.5) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  // Fully expanded: the swipeable carousel
+                                  // takes over the rect. Any collapse drag
+                                  // (t < 1) hands back to the morphing art.
+                                  if (t >= 0.999) return carousel;
+                                  return child!;
+                                },
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    borderRadius:
+                                        BorderRadius.circular(4 + 6 * t),
+                                    boxShadow: [
+                                      // Soft colored glow under the art,
+                                      // grows in with expansion.
+                                      if (t > 0.3 && _artColorShown != null)
+                                        BoxShadow(
+                                          color: _artColorShown!
+                                              .withValues(alpha: 0.45 * t),
+                                          blurRadius: 32 * t,
+                                          spreadRadius: 2 * t,
+                                          offset: Offset(0, 10 * t),
+                                        ),
+                                    ],
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius:
+                                        BorderRadius.circular(4 + 6 * t),
+                                    child: FittedBox(
+                                        fit: BoxFit.fill, child: art),
+                                  ),
                                 ),
                               ),
                             ),
+                            // Video overlay (YouTube tracks): occupies the art
+                            // rect only when expanded and the video is playing.
+                            if (t > 0.5)
+                              Positioned.fromRect(
+                                rect: artRect,
+                                child: ValueListenableBuilder<bool>(
+                                  valueListenable: videoOn,
+                                  builder: (_, on, _) => on
+                                      ? _VideoOverlay(radius: 4 + 6 * t)
+                                      : const SizedBox.shrink(),
+                                ),
+                              ),
+                            // In-player queue panel: slides up from the bottom
+                            // edge, pulled by the drag router above.
+                            if (t > 0.95 && _q.value > 0.001)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                height: qHeight,
+                                bottom: qHeight * (_q.value - 1),
+                                child: queuePanel,
+                              ),
                           ],
                         ),
                       ),
@@ -236,8 +535,7 @@ class _PlayerSheetState extends State<PlayerSheet>
                   ),
                 ],
               );
-            },
-          ),
+          },
         );
       },
     );
@@ -265,6 +563,7 @@ class _MiniBarState extends State<_MiniBar> {
     final commit = drag.abs() > width / 3 || v.abs() > 700;
     if (mounted) setState(() => _hDrag = 0);
     if (commit) {
+      HapticFeedback.selectionClick();
       final forward = drag < 0 || v < -700;
       forward ? await widget.ps.next() : await widget.ps.previousSmart();
     }
@@ -337,7 +636,8 @@ class _MiniBarState extends State<_MiniBar> {
                   builder: (_, snap) {
                     final playing = snap.data?.playing ?? false;
                     return IconButton(
-                      icon: Icon(playing ? Icons.pause : Icons.play_arrow),
+                      icon: _AnimatedPlayPause(
+                          playing: playing, size: 24, color: PA.text),
                       onPressed: ps.togglePlay,
                     );
                   },
@@ -351,20 +651,568 @@ class _MiniBarState extends State<_MiniBar> {
   }
 }
 
+/// Play/pause glyph that morphs between the two icons instead of hard-swapping.
+class _AnimatedPlayPause extends StatefulWidget {
+  final bool playing;
+  final double size;
+  final Color color;
+  const _AnimatedPlayPause(
+      {required this.playing, required this.size, required this.color});
+  @override
+  State<_AnimatedPlayPause> createState() => _AnimatedPlayPauseState();
+}
+
+class _AnimatedPlayPauseState extends State<_AnimatedPlayPause>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+      value: widget.playing ? 1 : 0);
+
+  @override
+  void didUpdateWidget(_AnimatedPlayPause old) {
+    super.didUpdateWidget(old);
+    if (widget.playing != old.playing) {
+      widget.playing ? _c.forward() : _c.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedIcon(
+        icon: AnimatedIcons.play_pause,
+        progress: _c,
+        size: widget.size,
+        color: widget.color,
+      );
+}
+
+/// Now-playing audio quality: a badge (LOSSLESS / HI-RES / 320) plus a detail
+/// line (FLAC · 1055 kbps · 44.1 kHz). Loads per track; hidden until known.
+class _QualityReadout extends StatefulWidget {
+  final Track track;
+  const _QualityReadout({required this.track});
+  @override
+  State<_QualityReadout> createState() => _QualityReadoutState();
+}
+
+class _QualityReadoutState extends State<_QualityReadout> {
+  AudioFormat? _fmt;
+  String? _key;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _QualityReadout old) {
+    super.didUpdateWidget(old);
+    if (old.track.key != widget.track.key) _load();
+  }
+
+  void _load() {
+    if (_key == widget.track.key) return;
+    _key = widget.track.key;
+    _fmt = null;
+    final track = widget.track;
+    context.read<AppState>().audioFormats.forTrack(track).then((f) {
+      if (mounted && _key == track.key) setState(() => _fmt = f);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final f = _fmt;
+    if (f == null) return const SizedBox(height: 20);
+    final hi = f.isHiRes || f.isLossless;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: hi ? PA.accent : PA.card,
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: Text(f.badge,
+              style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                  color: hi ? Colors.black : PA.textSecondary)),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(f.detailLine,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: PA.textMuted, fontSize: 11)),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Up next" strip: shows the track that will play next (shuffle/loop-aware),
+/// tap to jump straight to it, or tap the queue icon to open the full queue.
+class _UpNextStrip extends StatelessWidget {
+  final PlayerService ps;
+  final VoidCallback onOpenQueue;
+  const _UpNextStrip({required this.ps, required this.onOpenQueue});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int?>(
+      stream: ps.currentIndex,
+      builder: (_, _) {
+        final next = ps.effectiveNextTrack;
+        if (next == null) return const SizedBox(height: 34);
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(PA.rSm),
+            onTap: () => ps.next(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(
+                children: [
+                  const Text('UP NEXT',
+                      style: TextStyle(
+                          color: PA.textMuted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text('${next.title} · ${next.artist}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: PA.textSecondary, fontSize: 12)),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.queue_music,
+                        size: 18, color: PA.textMuted),
+                    onPressed: onOpenQueue,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Swipeable artwork carousel for the expanded player: the current art plus
+/// its audible neighbors (shuffle/loop-aware via PlayerService), dragged with
+/// the finger and spring-settled. Committing a swipe changes the track; the
+/// resulting index-change rebuild recenters the carousel on the new current.
+class _ArtCarousel extends StatefulWidget {
+  final PlayerService ps;
+  final Track track;
+  final double side;
+  final ValueNotifier<bool> lyricsOn;
+  final Color? glow; // dominant art color for the soft shadow
+  const _ArtCarousel(
+      {required this.ps,
+      required this.track,
+      required this.side,
+      required this.lyricsOn,
+      this.glow});
+
+  @override
+  State<_ArtCarousel> createState() => _ArtCarouselState();
+}
+
+class _ArtCarouselState extends State<_ArtCarousel>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _settle =
+      AnimationController.unbounded(vsync: this)
+        ..addListener(() => setState(() => _drag = _settle.value));
+  double _drag = 0;
+  bool _switching = false; // swipe committed, waiting for the track change
+
+  // Art subtrees cached by track key: drag frames then reuse the exact same
+  // widget instances, so Flutter skips rebuilding the image subtree entirely.
+  final Map<String, Widget> _artCache = {};
+
+  static const _gap = 24.0;
+
+  @override
+  void didUpdateWidget(covariant _ArtCarousel old) {
+    super.didUpdateWidget(old);
+    if (old.track.key != widget.track.key) {
+      // Bounded cache: reset when it grows past the tracks near current.
+      if (_artCache.length > 8) _artCache.clear();
+      // New current track — it was the card the swipe centered, so snapping
+      // the offset back to 0 under the new build is seamless.
+      _settle.stop();
+      _drag = 0;
+      _switching = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _settle.dispose();
+    super.dispose();
+  }
+
+  void _to(double target, double velocity) {
+    _settle.value = _drag;
+    _settle.animateWith(SpringSimulation(
+      SpringDescription.withDampingRatio(mass: 1, stiffness: 500, ratio: 1.0),
+      _drag,
+      target,
+      velocity,
+    ));
+  }
+
+  Future<void> _end(DragEndDetails d) async {
+    if (_switching) return;
+    final v = d.velocity.pixelsPerSecond.dx;
+    final side = widget.side;
+    final commit = _drag.abs() > side / 3 || v.abs() > 700;
+    final forward = _drag < 0 || v < -700;
+    final neighbor = forward
+        ? widget.ps.effectiveNextTrack
+        : widget.ps.effectivePreviousTrack;
+    if (!commit || neighbor == null) {
+      _to(0, v);
+      return;
+    }
+    _switching = true;
+    HapticFeedback.selectionClick();
+    _to(forward ? -(side + _gap) : (side + _gap), v);
+    forward ? await widget.ps.next() : await widget.ps.previous();
+    // The index-change rebuild recenters via didUpdateWidget. If it never
+    // comes (e.g. loop-one keeps the same index), snap back.
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted && _switching) {
+        _switching = false;
+        _to(0, 0);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final side = widget.side;
+    final prev = widget.ps.effectivePreviousTrack;
+    final next = widget.ps.effectiveNextTrack;
+
+    Widget slot(Track? tr, double off) {
+      final x = off + _drag;
+      final centered = (1 - (x.abs() / (side + _gap))).clamp(0.0, 1.0);
+      // Cards shrink slightly as they leave center — cheap depth cue.
+      final scale = 1 - 0.08 * (1 - centered);
+      Widget card = tr == null
+          ? const SizedBox.shrink()
+          : DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      if (widget.glow != null && centered > 0.2)
+                        BoxShadow(
+                          color: widget.glow!
+                              .withValues(alpha: 0.45 * centered),
+                          blurRadius: 32,
+                          spreadRadius: 2,
+                          offset: const Offset(0, 10),
+                        ),
+                    ],
+                  ),
+                  child: _artCache.putIfAbsent(
+                    tr.key,
+                    () => RepaintBoundary(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: TrackArt(
+                          artUri: tr.artUri,
+                          artPath: tr.artPath,
+                          size: side,
+                          radius: 0,
+                          px: 800,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+      // The centered card breathes with the waveform (local tracks).
+      if (off == 0 && tr != null) {
+        card = _PulseArt(ps: widget.ps, track: tr, child: card);
+      }
+      return Positioned(
+        left: x,
+        top: 0,
+        width: side,
+        height: side,
+        child: Transform.scale(scale: scale, child: card),
+      );
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onDoubleTap: () => widget.lyricsOn.value = !widget.lyricsOn.value,
+      onHorizontalDragUpdate: (d) {
+        if (!_switching) setState(() => _drag += d.delta.dx);
+      },
+      onHorizontalDragEnd: _end,
+      child: SizedBox(
+        width: side,
+        height: side,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            slot(prev, -(side + _gap)),
+            slot(next, side + _gap),
+            slot(widget.track, 0), // current on top
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Namida-style beat pulse: scales its child with the track's waveform
+/// amplitude at the playhead. Local tracks only (waveform data source);
+/// transparent pass-through otherwise. The position stream ticks a few times
+/// a second and AnimatedScale glides between amplitudes.
+class _PulseArt extends StatefulWidget {
+  final PlayerService ps;
+  final Track track;
+  final Widget child;
+  const _PulseArt(
+      {required this.ps, required this.track, required this.child});
+  @override
+  State<_PulseArt> createState() => _PulseArtState();
+}
+
+class _PulseArtState extends State<_PulseArt> {
+  List<double>? _bars;
+  String? _key;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PulseArt old) {
+    super.didUpdateWidget(old);
+    if (old.track.key != widget.track.key) _load();
+  }
+
+  void _load() {
+    final t = widget.track;
+    if (_key == t.key) return;
+    _key = t.key;
+    _bars = null;
+    if (!WaveformService.eligible(t)) return;
+    context.read<AppState>().waveforms?.forTrack(t).then((bars) {
+      if (mounted && _key == t.key) setState(() => _bars = bars);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bars = _bars;
+    if (bars == null || bars.isEmpty) return widget.child;
+    return StreamBuilder<Duration>(
+      stream: widget.ps.position,
+      builder: (_, snap) {
+        var amp = 0.0;
+        final dur = widget.ps.player.duration?.inMilliseconds ?? 0;
+        final pos = snap.data?.inMilliseconds ?? 0;
+        if (dur > 0) {
+          final i = (pos / dur * bars.length)
+              .floor()
+              .clamp(0, bars.length - 1);
+          amp = bars[i].clamp(0.0, 1.0);
+        }
+        return AnimatedScale(
+          scale: 1 + 0.045 * amp,
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOut,
+          child: widget.child,
+        );
+      },
+    );
+  }
+}
+
+/// Single-line text that auto-scrolls when it overflows, with a hold at each
+/// end. Renders a plain Text when it fits — zero cost for short titles.
+class _Marquee extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  const _Marquee({required this.text, required this.style});
+  @override
+  State<_Marquee> createState() => _MarqueeState();
+}
+
+class _MarqueeState extends State<_Marquee>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(seconds: 7));
+
+  // Measured text width, cached by (text, style) — TextPainter.layout is not
+  // free and build runs per frame while the sheet animates.
+  double? _textW;
+  String? _measuredText;
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (_, cons) {
+      if (_measuredText != widget.text) {
+        _measuredText = widget.text;
+        _textW = (TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          maxLines: 1,
+          textDirection: TextDirection.ltr,
+        )..layout())
+            .width;
+      }
+      final overflow = _textW! - cons.maxWidth;
+      if (overflow <= 0) {
+        // The ticker must be dead when nothing scrolls — a repeating
+        // controller keeps the whole app pumping frames forever.
+        if (_c.isAnimating) _c.stop();
+        return Text(widget.text,
+            maxLines: 1, overflow: TextOverflow.ellipsis, style: widget.style);
+      }
+      if (!_c.isAnimating) _c.repeat(reverse: true);
+      return RepaintBoundary(
+        child: ClipRect(
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (_, _) {
+              // Hold 25% at each end, scroll across the middle 50%.
+              final p = ((_c.value - 0.25) / 0.5).clamp(0.0, 1.0);
+              return Transform.translate(
+                offset: Offset(-overflow * p, 0),
+                child: SizedBox(
+                  width: _textW,
+                  child: Text(widget.text,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                      style: widget.style),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    });
+  }
+}
+
+/// Shrinks its child slightly while pressed. Listener-based so it never
+/// competes with the child's own tap/long-press handlers.
+class _PressScale extends StatefulWidget {
+  final Widget child;
+  const _PressScale({required this.child});
+  @override
+  State<_PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<_PressScale> {
+  bool _down = false;
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => setState(() => _down = true),
+      onPointerUp: (_) => setState(() => _down = false),
+      onPointerCancel: (_) => setState(() => _down = false),
+      child: AnimatedScale(
+        scale: _down ? 0.88 : 1.0,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// The YouTube video overlay: fills the artwork rect while active. Its own
+/// audio comes from the muxed stream, so just_audio stays paused meanwhile.
+class _VideoOverlay extends StatelessWidget {
+  final double radius;
+  const _VideoOverlay({required this.radius});
+  @override
+  Widget build(BuildContext context) {
+    final vid = context.read<AppState>().ytVideo;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: AnimatedBuilder(
+          animation: vid,
+          builder: (_, _) {
+            if (vid.loading) {
+              return const CircularProgressIndicator(color: PA.accent);
+            }
+            final c = vid.controller;
+            if (c == null || !c.value.isInitialized) {
+              return const Icon(Icons.ondemand_video,
+                  color: PA.textMuted, size: 40);
+            }
+            return FittedBox(
+              fit: BoxFit.cover,
+              clipBehavior: Clip.hardEdge,
+              child: SizedBox(
+                width: c.value.size.width,
+                height: c.value.size.height,
+                child: VideoPlayer(c),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _FullPlayer extends StatelessWidget {
   final PlayerService ps;
   final Track track;
   final double topInset;
   final double artSide; // must match the sheet's morph target rect
   final ValueNotifier<bool> lyricsOn;
+  final ValueNotifier<bool> videoOn;
+  final Future<void> Function(String videoId) onToggleVideo;
   final VoidCallback onCollapse;
+  final VoidCallback onQueue;
   const _FullPlayer(
       {required this.ps,
       required this.track,
       required this.topInset,
       required this.artSide,
       required this.lyricsOn,
-      required this.onCollapse});
+      required this.videoOn,
+      required this.onToggleVideo,
+      required this.onCollapse,
+      required this.onQueue});
 
   @override
   Widget build(BuildContext context) {
@@ -389,7 +1237,7 @@ class _FullPlayer extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.queue_music),
-                onPressed: () => showQueueSheet(context, ps),
+                onPressed: onQueue,
               ),
             ],
           ),
@@ -422,26 +1270,41 @@ class _FullPlayer extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Spotify-style: title opens the album, artist opens the
-                    // artist hub (YouTube → PC → on-phone, labeled sections).
+                    // Title opens the album (falls back to the artist page when
+                    // there's no album, e.g. YT singles). Collapse the sheet
+                    // first — it's an overlay above the navigator, so a pushed
+                    // route would otherwise appear *behind* it.
                     GestureDetector(
-                      onTap: () =>
-                          openAlbum(context, context.read<AppState>(), track),
-                      child: Text(track.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        onCollapse();
+                        openAlbum(context, context.read<AppState>(), track);
+                      },
+                      child: _Marquee(
+                          text: track.title,
                           style: const TextStyle(
                               fontSize: 22, fontWeight: FontWeight.bold)),
                     ),
                     const SizedBox(height: 4),
+                    // Artist → artist page, with a chevron to signal it's a link.
                     GestureDetector(
-                      onTap: () =>
-                          openArtist(context, context.read<AppState>(), track),
-                      child: Text(track.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 15, color: PA.textSecondary)),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        onCollapse();
+                        openArtist(context, context.read<AppState>(), track);
+                      },
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: _Marquee(
+                                text: track.artist,
+                                style: const TextStyle(
+                                    fontSize: 15, color: PA.textSecondary)),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              size: 18, color: PA.textMuted),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -449,10 +1312,15 @@ class _FullPlayer extends StatelessWidget {
               _FavButton(track: track, size: 26),
             ],
           ),
+          const SizedBox(height: 6),
+          _QualityReadout(track: track),
           const Spacer(),
           SeekBar(ps: ps, track: track),
           TransportControls(ps: ps),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
+          // Up next: the track that actually follows (shuffle/loop-aware).
+          _UpNextStrip(ps: ps, onOpenQueue: onQueue),
+          const SizedBox(height: 4),
           // Namida-style utility row: sleep, speed, queue.
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -487,16 +1355,30 @@ class _FullPlayer extends StatelessWidget {
                   onPressed: () => lyricsOn.value = !lyr,
                 ),
               ),
+              // Video toggle — YouTube tracks only.
+              if (track.id.startsWith('yt:'))
+                ValueListenableBuilder<bool>(
+                  valueListenable: videoOn,
+                  builder: (_, on, _) => IconButton(
+                    tooltip: on ? 'Hide video' : 'Show video',
+                    icon: Icon(on ? Icons.music_note : Icons.ondemand_video_outlined,
+                        size: 20, color: on ? PA.accent : PA.textMuted),
+                    onPressed: () => onToggleVideo(track.id.substring(3)),
+                  ),
+                ),
               StreamBuilder<bool>(
                 stream: ps.equalizer.enabledStream,
                 builder: (_, snap) => IconButton(
                   icon: Icon(Icons.equalizer,
                       size: 20,
                       color: (snap.data ?? false) ? PA.accent : PA.textMuted),
-                  onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const EqualizerScreen())),
+                  onPressed: () {
+                    onCollapse();
+                    Navigator.push(
+                        Shell.contentContext(context),
+                        MaterialPageRoute(
+                            builder: (_) => const EqualizerScreen()));
+                  },
                 ),
               ),
               IconButton(
@@ -601,21 +1483,51 @@ class _LyricsPanel extends StatelessWidget {
   }
 }
 
-class _FavButton extends StatelessWidget {
+class _FavButton extends StatefulWidget {
   final Track track;
   final double size;
   const _FavButton({required this.track, required this.size});
+  @override
+  State<_FavButton> createState() => _FavButtonState();
+}
+
+class _FavButtonState extends State<_FavButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+  // Overshoot-and-settle so favoriting gives a satisfying little pop.
+  late final Animation<double> _scale = TweenSequence<double>([
+    TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.35), weight: 40),
+    TweenSequenceItem(tween: Tween(begin: 1.35, end: 1.0), weight: 60),
+  ]).animate(CurvedAnimation(parent: _c, curve: Curves.easeOut));
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  void _toggle(dynamic pl) {
+    final becomingFav = !pl.isFavorite(widget.track);
+    HapticFeedback.lightImpact();
+    pl.toggleFavorite(widget.track);
+    if (becomingFav) _c.forward(from: 0);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pl = context.read<AppState>().playlists;
     return AnimatedBuilder(
       animation: pl,
       builder: (_, _) {
-        final fav = pl.isFavorite(track);
+        final fav = pl.isFavorite(widget.track);
         return IconButton(
-          icon: Icon(fav ? Icons.favorite : Icons.favorite_border,
-              size: size, color: fav ? PA.accent : PA.textSecondary),
-          onPressed: () => pl.toggleFavorite(track),
+          icon: ScaleTransition(
+            scale: _scale,
+            child: Icon(fav ? Icons.favorite : Icons.favorite_border,
+                size: widget.size, color: fav ? PA.accent : PA.textSecondary),
+          ),
+          onPressed: () => _toggle(pl),
         );
       },
     );
@@ -634,6 +1546,7 @@ class SeekBar extends StatefulWidget {
 
 class _SeekBarState extends State<SeekBar> {
   double? _dragValue; // seconds; non-null while the thumb is being dragged
+  bool _remaining = false; // right label shows -remaining instead of total
   List<double>? _bars;
   String? _barsKey;
 
@@ -693,9 +1606,11 @@ class _SeekBarState extends State<SeekBar> {
                     )
                   : SliderTheme(
                       data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        thumbShape:
-                            const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        // Track and thumb grow while scrubbing for feedback.
+                        trackHeight: _dragValue != null ? 5 : 3,
+                        thumbShape: RoundSliderThumbShape(
+                            enabledThumbRadius:
+                                _dragValue != null ? 8.5 : 6),
                         overlayShape:
                             const RoundSliderOverlayShape(overlayRadius: 14),
                         activeTrackColor: PA.accent,
@@ -725,9 +1640,18 @@ class _SeekBarState extends State<SeekBar> {
                         Text(fmtDuration(value / 1000),
                             style: const TextStyle(
                                 fontSize: 11, color: PA.textMuted)),
-                        Text(fmtDuration(total / 1000),
-                            style: const TextStyle(
-                                fontSize: 11, color: PA.textMuted)),
+                        // Tap the right label to flip total ⇄ remaining.
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () =>
+                              setState(() => _remaining = !_remaining),
+                          child: Text(
+                              _remaining
+                                  ? '-${fmtDuration((total - value) / 1000)}'
+                                  : fmtDuration(total / 1000),
+                              style: const TextStyle(
+                                  fontSize: 11, color: PA.textMuted)),
+                        ),
                       ],
                     ),
                   ),
@@ -874,10 +1798,12 @@ class _TransportControlsState extends State<TransportControls> {
           onLongPressStart: (_) => _startHoldSeek(-1),
           onLongPressEnd: (_) => _stopHoldSeek(),
           onLongPressCancel: _stopHoldSeek,
-          child: IconButton(
-            icon: const Icon(Icons.skip_previous, size: 38),
-            color: Colors.white,
-            onPressed: ps.previousSmart,
+          child: _PressScale(
+            child: IconButton(
+              icon: const Icon(Icons.skip_previous, size: 38),
+              color: Colors.white,
+              onPressed: ps.previousSmart,
+            ),
           ),
         ),
         StreamBuilder<PlayerState>(
@@ -890,18 +1816,22 @@ class _TransportControlsState extends State<TransportControls> {
                     state?.processingState == ProcessingState.buffering;
             return GestureDetector(
               onTap: ps.togglePlay,
-              child: Container(
-                width: 68,
-                height: 68,
-                decoration: const BoxDecoration(
-                    color: Colors.white, shape: BoxShape.circle),
-                child: buffering
-                    ? const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: CircularProgressIndicator(
-                            strokeWidth: 3, color: Colors.black))
-                    : Icon(playing ? Icons.pause : Icons.play_arrow,
-                        color: Colors.black, size: 40),
+              child: _PressScale(
+                child: Container(
+                  width: 68,
+                  height: 68,
+                  // Without this the glyph paints at the circle's top-left.
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                      color: Colors.white, shape: BoxShape.circle),
+                  child: buffering
+                      ? const Padding(
+                          padding: EdgeInsets.all(20),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 3, color: Colors.black))
+                      : _AnimatedPlayPause(
+                          playing: playing, size: 40, color: Colors.black),
+                ),
               ),
             );
           },
@@ -910,10 +1840,12 @@ class _TransportControlsState extends State<TransportControls> {
           onLongPressStart: (_) => _startHoldSeek(1),
           onLongPressEnd: (_) => _stopHoldSeek(),
           onLongPressCancel: _stopHoldSeek,
-          child: IconButton(
-            icon: const Icon(Icons.skip_next, size: 38),
-            color: Colors.white,
-            onPressed: ps.next,
+          child: _PressScale(
+            child: IconButton(
+              icon: const Icon(Icons.skip_next, size: 38),
+              color: Colors.white,
+              onPressed: ps.next,
+            ),
           ),
         ),
         StreamBuilder<LoopMode>(
@@ -945,14 +1877,28 @@ void showQueueSheet(BuildContext context, PlayerService ps) {
   );
 }
 
-class _QueueSheet extends StatefulWidget {
+class _QueueSheet extends StatelessWidget {
   final PlayerService ps;
   const _QueueSheet({required this.ps});
   @override
-  State<_QueueSheet> createState() => _QueueSheetState();
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.65,
+      child: QueuePanel(ps: ps),
+    );
+  }
 }
 
-class _QueueSheetState extends State<_QueueSheet> {
+/// The queue list itself — shared by the modal sheet and the in-player
+/// slide-up panel. Reorder, swipe-to-remove with undo, tap-to-jump.
+class QueuePanel extends StatefulWidget {
+  final PlayerService ps;
+  const QueuePanel({super.key, required this.ps});
+  @override
+  State<QueuePanel> createState() => _QueuePanelState();
+}
+
+class _QueuePanelState extends State<QueuePanel> {
   static const _rowHeight = 64.0;
   late final ScrollController _scroll = ScrollController(
     // Open with the playing track a couple of rows from the top.
@@ -970,9 +1916,7 @@ class _QueueSheetState extends State<_QueueSheet> {
   @override
   Widget build(BuildContext context) {
     final ps = widget.ps;
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.65,
-      child: ValueListenableBuilder<int>(
+    return ValueListenableBuilder<int>(
         valueListenable: ps.queueRevision,
         builder: (_, _, _) => StreamBuilder<int?>(
           stream: ps.currentIndex,
@@ -1039,7 +1983,11 @@ class _QueueSheetState extends State<_QueueSheet> {
                     scrollController: _scroll,
                     itemExtent: _rowHeight,
                     itemCount: queue.length,
-                    onReorderItem: (from, to) => ps.moveInQueue(from, to),
+                    onReorder: (from, to) {
+                      if (to > from) to -= 1; // ReorderableListView index convention
+                      HapticFeedback.lightImpact();
+                      ps.moveInQueue(from, to);
+                    },
                     itemBuilder: (_, i) {
                       final t = queue[i];
                       final isCurrent = i == current;
@@ -1107,7 +2055,6 @@ class _QueueSheetState extends State<_QueueSheet> {
             );
           },
         ),
-      ),
     );
   }
 }

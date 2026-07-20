@@ -12,6 +12,7 @@ import 'history.dart';
 import 'local_library.dart';
 import 'models.dart';
 import 'settings.dart';
+import 'yt/yt_service.dart';
 
 /// Native gapless playback via just_audio + a background/lock-screen handler.
 /// This is the layer that gives the "buttery" feel — audio runs on the platform
@@ -33,8 +34,17 @@ class PlayerService {
   HistoryService? history;
   SettingsService? settings;
 
+  /// On-device YouTube stream resolution. When set, `yt:` tracks without a
+  /// sourceUri play through a lazy resolving source instead of the PC bridge.
+  YtStreamResolver? ytResolver;
+  int? _errorRetryIndex; // queue index we've already retried after a stream error
+
   /// Notified whenever a brand-new queue starts (for the saved-queues archive).
   void Function(List<Track>)? onNewQueue;
+
+  /// Fired when playback moves to a new track — used for the ListenBrainz
+  /// "now playing" ping.
+  void Function(Track)? onTrackStart;
 
   Timer? _tick;
 
@@ -44,7 +54,10 @@ class PlayerService {
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!_player.playing) return;
       final t = currentTrack;
-      if (t != null) history?.onPositionTick(t);
+      if (t != null) {
+        history?.onPositionTick(t,
+            positionSec: _player.position.inMilliseconds / 1000.0);
+      }
       _sleepOnTick();
       _transitionFadeOnTick();
       if (++_posTicks % 5 == 0) _savePosition();
@@ -58,17 +71,62 @@ class PlayerService {
           _queue.isNotEmpty) {
         await _player.pause();
         await _player.seek(Duration.zero, index: 0);
+        _restoreAfterFadeIfIdle();
       }
     });
     // Chained play-next resets once playback moves to a new track; when
     // transition fades are on, each new track opens with a short fade-in.
-    _player.currentIndexStream.listen((_) {
+    // A dead stream (region-locked/removed YouTube track, expired URL) must
+    // never halt an hours-long session. Most failures are expired URLs, so for
+    // a YouTube track try ONE fresh-URL retry of the same track before giving
+    // up and skipping to the next entry.
+    _player.playbackEventStream.listen((_) {}, onError: (Object e, _) async {
+      final i = _player.currentIndex;
+      if (i == null || i < 0 || i >= _queue.length) return;
+      final t = _queue[i];
+      final isYt = t.sourceUri == null && t.id.startsWith('yt:');
+      try {
+        if (isYt && _errorRetryIndex != i) {
+          _errorRetryIndex = i; // one retry per track occurrence
+          final vid = t.id.substring(3);
+          // Most failures are expired URLs; the other common one is a
+          // length-capped URL (plays ~1 min, then the stream dies). Steer the
+          // retry away from whichever client just produced the dead URL so we
+          // resolve a full-file stream from a different client.
+          ytResolver?.invalidate(vid,
+              avoidClient: ytResolver?.clientFor(vid));
+          await _player.seek(Duration.zero, index: i); // re-request fresh URL
+          if (_player.playing) _player.play();
+          return;
+        }
+        if (i + 1 < _queue.length) {
+          await _player.seek(Duration.zero, index: i + 1);
+          if (_player.playing) _player.play();
+        }
+      } catch (_) {}
+    });
+    _player.currentIndexStream.listen((i) {
       _lastInsert = null;
+      if (_errorRetryIndex != i) _errorRetryIndex = null; // moved on — re-arm retry
+      _prefetchUpcomingYt(i);
+      final started = currentTrack;
+      if (started != null) onTrackStart?.call(started);
+      if (_pendingNextKey != null &&
+          i != null &&
+          i >= 0 &&
+          i < _queue.length &&
+          _queue[i].key == _pendingNextKey) {
+        _pendingNextKey = null; // the play-next target is now playing
+      }
       final fadeSec = settings?.transitionFadeSec ?? 0;
       if (fadeSec > 0 && _player.playing) {
         final seq = ++_rampSeq;
         _player.setVolume(0.15);
         _ramp(0.15, _baseVolume, (fadeSec * 350).clamp(700, 2500), seq);
+      } else {
+        // A tail fade may have lowered the volume with no fade-in coming
+        // (fades disabled mid-track, or paused at the boundary) — restore.
+        _restoreAfterFadeIfIdle();
       }
     });
   }
@@ -99,23 +157,52 @@ class PlayerService {
     return _queue[i];
   }
 
+  /// The track that would audibly play on next()/previous() — shuffle- and
+  /// loop-aware (just_audio computes these over its effective order). The
+  /// artwork carousel uses them so the visual neighbor always matches the
+  /// audible one.
+  Track? get effectiveNextTrack => trackAt(_player.nextIndex);
+  Track? get effectivePreviousTrack => trackAt(_player.previousIndex);
+
+  Track? trackAt(int? i) =>
+      (i == null || i < 0 || i >= _queue.length) ? null : _queue[i];
+
   /// Where the audio actually comes from: an explicit URI (local file,
   /// MediaStore content://, YouTube stream) or the bridge's /stream endpoint.
   AudioSource _sourceFor(Track t) {
-    final url = t.sourceUri ?? bridge.streamUrl(t.filePath);
-    return AudioSource.uri(
-      Uri.parse(url),
-      tag: MediaItem(
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        album: t.album,
-        duration: t.duration > 0
-            ? Duration(milliseconds: (t.duration * 1000).round())
-            : null,
-        artUri: _artUriFor(t),
-      ),
+    final tag = MediaItem(
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      album: t.album,
+      duration: t.duration > 0
+          ? Duration(milliseconds: (t.duration * 1000).round())
+          : null,
+      artUri: _artUriFor(t),
     );
+    // On-device YouTube: resolve the stream lazily at play time, so enqueuing
+    // a 30-track mix costs nothing up front.
+    final resolver = ytResolver;
+    if (resolver != null && t.sourceUri == null && t.id.startsWith('yt:')) {
+      return YtLazyAudioSource(t.id.substring(3), resolver, tag: tag);
+    }
+    final url = t.sourceUri ?? bridge.streamUrl(t.filePath);
+    return AudioSource.uri(Uri.parse(url), tag: tag);
+  }
+
+  /// Warm stream URLs for the next queue entries so YT track changes are
+  /// gapless-feeling. Called on every index change.
+  void _prefetchUpcomingYt(int? index) {
+    final resolver = ytResolver;
+    if (resolver == null || index == null) return;
+    final ids = <String>[];
+    for (var i = index; i < _queue.length && ids.length < 3; i++) {
+      final t = _queue[i];
+      if (t.sourceUri == null && t.id.startsWith('yt:')) {
+        ids.add(t.id.substring(3));
+      }
+    }
+    resolver.prefetch(ids);
   }
 
   /// Lock-screen artwork URI. `localart://` is an in-app convention, so it maps
@@ -139,10 +226,36 @@ class PlayerService {
   /// its listening position can be remembered and resumed later.
   String? currentCollectionId;
 
+  /// All queue mutations run through this chain. A bulk edit awaits hundreds
+  /// of sequential player ops; a user action landing mid-flight would compute
+  /// its index against the mutated [_queue] while the player still holds the
+  /// old source list, desyncing the two for the rest of the session.
+  Future<void> _queueOps = Future.value();
+  Future<T> _queueOp<T>(Future<T> Function() op) {
+    final run = _queueOps.then((_) => op());
+    _queueOps = run.then((_) {}, onError: (_) {});
+    return run;
+  }
+
+  /// Bookkeeping shared by structural queue edits: once edited, the queue no
+  /// longer mirrors the collection it was created from, so its resume point
+  /// must stop tracking (or the saved index would point at the wrong track).
+  void _queueEdited() {
+    currentCollectionId = null;
+    queueRevision.value++;
+    _saveQueueSoon();
+  }
+
   Future<void> playQueue(List<Track> tracks, int startIndex,
+          {String? collectionId, Duration? startPosition}) =>
+      _queueOp(() => _playQueueLocked(tracks, startIndex,
+          collectionId: collectionId, startPosition: startPosition));
+
+  Future<void> _playQueueLocked(List<Track> tracks, int startIndex,
       {String? collectionId, Duration? startPosition}) async {
     _queue = List.of(tracks);
     currentCollectionId = collectionId;
+    _pendingNextKey = null;
     queueRevision.value++;
     _saveQueueSoon();
     onNewQueue?.call(_queue);
@@ -155,65 +268,74 @@ class PlayerService {
   }
 
   /// Shuffle-play a whole list: random start + shuffle mode on.
-  Future<void> playShuffled(List<Track> tracks) async {
-    if (tracks.isEmpty) return;
-    _queue = List.of(tracks);
-    queueRevision.value++;
-    _saveQueueSoon();
-    onNewQueue?.call(_queue);
-    await _player.setAudioSources(_queue.map(_sourceFor).toList());
-    await _player.setShuffleModeEnabled(true);
-    await _player.shuffle();
-    _player.play();
-  }
+  Future<void> playShuffled(List<Track> tracks) => _queueOp(() async {
+        if (tracks.isEmpty) return;
+        _queue = List.of(tracks);
+        // Not a collection queue — leaving the previous id in place would let
+        // the 5s position saver overwrite that collection's resume point with
+        // positions from this shuffled queue.
+        currentCollectionId = null;
+        _pendingNextKey = null;
+        queueRevision.value++;
+        _saveQueueSoon();
+        onNewQueue?.call(_queue);
+        await _player.setAudioSources(_queue.map(_sourceFor).toList());
+        await _player.setShuffleModeEnabled(true);
+        await _player.shuffle();
+        _player.play();
+      });
 
   int? _lastInsert; // where the last play-next landed, for chaining
+
+  /// In shuffle mode the platform's shuffle order won't visit a freshly
+  /// inserted sequence slot next — [next] compensates by seeking straight to
+  /// this track. Natural advance still follows the platform's shuffle order.
+  String? _pendingNextKey;
 
   /// Insert right after the current track ("play next"). Successive calls
   /// chain: A, B, C inserted while a track plays will play in A→B→C order
   /// instead of C→B→A.
-  Future<void> playNext(Track t) async {
-    if (_queue.isEmpty) return playQueue([t], 0);
-    final current = _player.currentIndex ?? -1;
-    var at = (_lastInsert != null && _lastInsert! > current)
-        ? _lastInsert! + 1
-        : current + 1;
-    at = at.clamp(0, _queue.length);
-    _queue.insert(at, t);
-    _lastInsert = at;
-    queueRevision.value++;
-    _saveQueueSoon();
-    await _player.insertAudioSource(at, _sourceFor(t));
-  }
+  Future<void> playNext(Track t) => _queueOp(() async {
+        if (_queue.isEmpty) return _playQueueLocked([t], 0);
+        final current = _player.currentIndex ?? -1;
+        var at = (_lastInsert != null && _lastInsert! > current)
+            ? _lastInsert! + 1
+            : current + 1;
+        at = at.clamp(0, _queue.length);
+        _queue.insert(at, t);
+        _lastInsert = at;
+        if (_player.shuffleModeEnabled) _pendingNextKey ??= t.key;
+        _queueEdited();
+        await _player.insertAudioSource(at, _sourceFor(t));
+      });
 
   /// Append to the end of the queue.
-  Future<void> addToQueue(Track t) async {
-    if (_queue.isEmpty) return playQueue([t], 0);
-    _queue.add(t);
-    queueRevision.value++;
-    _saveQueueSoon();
-    await _player.addAudioSource(_sourceFor(t));
-  }
+  Future<void> addToQueue(Track t) => _queueOp(() async {
+        if (_queue.isEmpty) return _playQueueLocked([t], 0);
+        _queue.add(t);
+        _queueEdited();
+        await _player.addAudioSource(_sourceFor(t));
+      });
 
   /// Removes and returns the track so callers can offer undo.
-  Future<Track?> removeFromQueue(int index) async {
-    if (index < 0 || index >= _queue.length || _queue.length <= 1) return null;
-    final removed = _queue.removeAt(index);
-    queueRevision.value++;
-    _saveQueueSoon();
-    await _player.removeAudioSourceAt(index);
-    return removed;
-  }
+  Future<Track?> removeFromQueue(int index) => _queueOp(() async {
+        if (index < 0 || index >= _queue.length || _queue.length <= 1) {
+          return null;
+        }
+        final removed = _queue.removeAt(index);
+        _queueEdited();
+        await _player.removeAudioSourceAt(index);
+        return removed;
+      });
 
   /// Undo helper — puts a removed track back at its original slot.
-  Future<void> insertAt(int index, Track t) async {
-    if (_queue.isEmpty) return playQueue([t], 0);
-    final at = index.clamp(0, _queue.length);
-    _queue.insert(at, t);
-    queueRevision.value++;
-    _saveQueueSoon();
-    await _player.insertAudioSource(at, _sourceFor(t));
-  }
+  Future<void> insertAt(int index, Track t) => _queueOp(() async {
+        if (_queue.isEmpty) return _playQueueLocked([t], 0);
+        final at = index.clamp(0, _queue.length);
+        _queue.insert(at, t);
+        _queueEdited();
+        await _player.insertAudioSource(at, _sourceFor(t));
+      });
 
   /// Bulk removals, Namida-style. Returns how many rows went away.
   Future<int> removeDuplicates() => _removeWhere((i, t) {
@@ -221,49 +343,40 @@ class PlayerService {
         return firstIdx != i && i != (_player.currentIndex ?? -1);
       });
 
-  Future<int> removeAllPrevious() async {
-    final current = _player.currentIndex ?? 0;
-    return _removeWhere((i, _) => i < current);
-  }
+  Future<int> removeAllPrevious() =>
+      _removeWhere((i, _) => i < (_player.currentIndex ?? 0));
 
-  Future<int> removeAllNext() async {
-    final current = _player.currentIndex ?? 0;
-    return _removeWhere((i, _) => i > current);
-  }
+  Future<int> removeAllNext() =>
+      _removeWhere((i, _) => i > (_player.currentIndex ?? 0));
 
-  Future<int> removeAllExceptCurrent() async {
-    final current = _player.currentIndex ?? 0;
-    return _removeWhere((i, _) => i != current);
-  }
+  Future<int> removeAllExceptCurrent() =>
+      _removeWhere((i, _) => i != (_player.currentIndex ?? 0));
 
-  Future<int> _removeWhere(bool Function(int, Track) test) async {
-    var removed = 0;
-    // Walk backwards so earlier indices stay valid while removing.
-    for (var i = _queue.length - 1; i >= 0; i--) {
-      if (_queue.length <= 1) break;
-      if (test(i, _queue[i])) {
-        _queue.removeAt(i);
-        await _player.removeAudioSourceAt(i);
-        removed++;
-      }
-    }
-    if (removed > 0) {
-      queueRevision.value++;
-      _saveQueueSoon();
-    }
-    return removed;
-  }
+  Future<int> _removeWhere(bool Function(int, Track) test) =>
+      _queueOp(() async {
+        var removed = 0;
+        // Walk backwards so earlier indices stay valid while removing.
+        for (var i = _queue.length - 1; i >= 0; i--) {
+          if (_queue.length <= 1) break;
+          if (test(i, _queue[i])) {
+            _queue.removeAt(i);
+            await _player.removeAudioSourceAt(i);
+            removed++;
+          }
+        }
+        if (removed > 0) _queueEdited();
+        return removed;
+      });
 
-  Future<void> moveInQueue(int from, int to) async {
-    if (from < 0 || from >= _queue.length) return;
-    to = to.clamp(0, _queue.length - 1);
-    if (from == to) return;
-    final t = _queue.removeAt(from);
-    _queue.insert(to, t);
-    queueRevision.value++;
-    _saveQueueSoon();
-    await _player.moveAudioSource(from, to);
-  }
+  Future<void> moveInQueue(int from, int to) => _queueOp(() async {
+        if (from < 0 || from >= _queue.length) return;
+        to = to.clamp(0, _queue.length - 1);
+        if (from == to) return;
+        final t = _queue.removeAt(from);
+        _queue.insert(to, t);
+        _queueEdited();
+        await _player.moveAudioSource(from, to);
+      });
 
   // ── Queue persistence (Namida-style "restore last session") ────────────────
 
@@ -294,9 +407,15 @@ class PlayerService {
       );
       // Deliberately not playing — the queue sits ready, like a native player.
     } catch (_) {
-      // Unreachable sources (bridge offline) or corrupt rows — start empty.
+      // Unreachable sources (bridge offline) or corrupt rows: the player has
+      // no sources, so drop the in-memory queue too — otherwise the UI shows a
+      // full queue whose rows all skipTo an empty player.
+      _queue = [];
+      queueRevision.value++;
     }
   }
+
+  int _queueSaveSeq = 0; // newest save wins even if an older encode finishes late
 
   Future<void> _saveQueueSoon() async {
     final db = _db;
@@ -304,10 +423,14 @@ class PlayerService {
     _queueSavePending = true;
     await Future.delayed(const Duration(seconds: 1));
     _queueSavePending = false;
+    final seq = ++_queueSaveSeq;
     try {
       // Serialize off the UI isolate — a 2000-track queue is megabytes of
       // jsonEncode work. (Perf audit finding.)
       final encoded = await compute(encodeTracksJson, List.of(_queue));
+      // A newer save started while this one was encoding — its snapshot is
+      // fresher, so drop this stale write instead of racing it to the DB.
+      if (seq != _queueSaveSeq) return;
       await db.db.transaction((txn) async {
         await txn.delete('queue_tracks');
         final batch = txn.batch();
@@ -344,6 +467,54 @@ class PlayerService {
     } catch (_) {}
   }
 
+  /// The most recently resumed collections, newest first — powers the home
+  /// "Jump back in" shelf. Rows whose position is essentially the very start
+  /// are dropped (nothing meaningful to resume).
+  Future<List<CollectionResume>> recentCollections({int limit = 10}) async {
+    final db = _db;
+    if (db == null) return const [];
+    try {
+      final rows = await db.db.query('collection_resume',
+          orderBy: 'updated_at DESC', limit: limit * 2);
+      final out = <CollectionResume>[];
+      for (final r in rows) {
+        final index = r['track_index'] as int;
+        final posMs = r['position_ms'] as int;
+        if (index == 0 && posMs < 3000) continue;
+        out.add(CollectionResume(
+          collectionId: r['collection_id'] as String,
+          index: index,
+          positionMs: posMs,
+          trackTitle: r['track_title'] as String?,
+          updatedAt: r['updated_at'] as int,
+        ));
+        if (out.length >= limit) break;
+      }
+      return out;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  // ── Video-toggle coordination ──────────────────────────────────────────────
+
+  /// Pause audio so the video overlay can take over, returning the position
+  /// (seconds) the video should start from.
+  Future<double> suspendForVideo() async {
+    final at = _player.position.inMilliseconds / 1000.0;
+    await _player.pause();
+    return at;
+  }
+
+  /// Resume audio at [sec] after the video overlay closes.
+  Future<void> resumeFromVideo(double sec) async {
+    try {
+      await _player.seek(Duration(milliseconds: (sec * 1000).round()));
+    } catch (_) {}
+    _restoreAfterFadeIfIdle();
+    _player.play();
+  }
+
   /// Saved listening position for a collection, if any.
   Future<ResumePoint?> resumeFor(String collectionId) async {
     final db = _db;
@@ -370,13 +541,31 @@ class PlayerService {
   static const _baseVolume = 1.0;
   int _rampSeq = 0; // newer ramps cancel older ones
 
+  /// True while the video overlay owns playback; audio must stay paused so the
+  /// two engines never play at once. Transport play/pause routes to the video.
+  bool videoActive = false;
+  void Function()? onVideoPlayPause;
+
   /// Play/pause with a short volume ramp (when enabled) instead of hard cuts.
   Future<void> togglePlay() async {
+    // Video mode: the transport controls the video, never the (paused) audio,
+    // so tapping play can't stack a second audio stream on top of the video.
+    if (videoActive) {
+      onVideoPlayPause?.call();
+      return;
+    }
     final s = settings;
     final fade = s?.playPauseFade ?? false;
     final ms = s?.fadeMs ?? 300;
     if (!fade) {
-      return _player.playing ? _player.pause() : _player.play();
+      if (_player.playing) {
+        await _player.pause();
+      } else {
+        // A tail fade may have left the volume down; resume at full volume.
+        _restoreAfterFadeIfIdle();
+        _player.play();
+      }
+      return;
     }
     final seq = ++_rampSeq;
     if (_player.playing) {
@@ -401,8 +590,29 @@ class PlayerService {
     }
   }
   Future<void> next() async {
+    final pending = _pendingNextKey;
+    if (pending != null && _player.shuffleModeEnabled) {
+      // A play-next insert is waiting; the shuffle order won't reach it next,
+      // so jump straight there.
+      final idx = _queue.indexWhere((t) => t.key == pending);
+      _pendingNextKey = null;
+      if (idx >= 0) {
+        await _player.seek(Duration.zero, index: idx);
+        _maybePlayOnSkip();
+        return;
+      }
+    }
     await _player.seekToNext();
     _maybePlayOnSkip();
+  }
+
+  /// If a tail fade dropped the volume and no fade-in is going to restore it
+  /// (playback paused/idle at a track boundary), bring it back to base.
+  void _restoreAfterFadeIfIdle() {
+    if (_player.volume < _baseVolume) {
+      _rampSeq++; // cancel any in-flight ramp loop
+      _player.setVolume(_baseVolume);
+    }
   }
 
   Future<void> previous() async {
@@ -551,6 +761,23 @@ class ResumePoint {
   final String? trackTitle;
   const ResumePoint(
       {required this.index, required this.positionMs, this.trackTitle});
+}
+
+/// A saved resume position for a collection (album/playlist/…), used by the
+/// home "Jump back in" shelf.
+class CollectionResume {
+  final String collectionId;
+  final int index;
+  final int positionMs;
+  final String? trackTitle;
+  final int updatedAt;
+  const CollectionResume({
+    required this.collectionId,
+    required this.index,
+    required this.positionMs,
+    this.trackTitle,
+    required this.updatedAt,
+  });
 }
 
 class SleepTimerState {

@@ -72,15 +72,27 @@ class HistoryService extends ChangeNotifier {
   String? _pendingKey; // track currently accruing playback time
   double _accrued = 0;
   bool _counted = false;
+  double _lastPositionSec = 0;
 
   /// Called by the player once per second of *playing* time on the current
   /// track. Switching tracks resets accrual, so skipping doesn't count.
-  void onPositionTick(Track t) {
+  ///
+  /// [positionSec] lets a *replay* of the same track (repeat-one, a queue with
+  /// the track twice in a row, or a seek-to-start) re-arm counting: without it
+  /// the key never changes and every replay after the first is lost.
+  void onPositionTick(Track t, {double? positionSec}) {
+    final pos = positionSec ?? (_lastPositionSec + 1);
     if (_pendingKey != t.key) {
       _pendingKey = t.key;
       _accrued = 0;
       _counted = false;
+    } else if (_counted && pos + 1.5 < _lastPositionSec) {
+      // Same track, but playback jumped back to (near) the start — treat it as
+      // a fresh play so the repeat counts again.
+      _accrued = 0;
+      _counted = false;
     }
+    _lastPositionSec = pos;
     if (_counted) return;
     _accrued += 1;
     final double threshold;
@@ -97,32 +109,61 @@ class HistoryService extends ChangeNotifier {
     }
   }
 
+  /// Fired once per counted play (post-threshold) — used for scrobbling.
+  void Function(Track t)? onListenRecorded;
+
   Future<void> _record(Track t) async {
     final now = DateTime.now().millisecondsSinceEpoch;
+    onListenRecorded?.call(t);
     counts.update(t.key, (n) => n + 1, ifAbsent: () => 1);
     firstListen.putIfAbsent(t.key, () => now);
     lastListen[t.key] = now;
     _byKey[t.key] = t;
-    int? dbId;
-    try {
-      dbId = await _db?.db.insert('history', {
-        'at': now,
-        'track_key': t.key,
-        'track_json': jsonEncode(t.toJson()),
-      });
-    } catch (_) {}
-    entries.insert(0, HistoryEntry(dbId: dbId, track: t, at: now));
+    // Surface in memory first so the UI (and callers) see the listen
+    // immediately; the DB id is backfilled when the insert lands.
+    final entry = HistoryEntry(track: t, at: now);
+    entries.insert(0, entry);
     if (entries.length > _memoryCap) {
       entries.removeRange(_memoryCap, entries.length);
     }
     revision++;
     notifyListeners();
+    try {
+      entry.dbId = await _db?.db.insert('history', {
+        'at': now,
+        'track_key': t.key,
+        'track_json': jsonEncode(t.toJson()),
+      });
+    } catch (_) {}
   }
 
   Future<void> removeEntry(HistoryEntry e) async {
     entries.remove(e);
-    final left = counts.update(e.track.key, (n) => n - 1, ifAbsent: () => 0);
-    if (left <= 0) counts.remove(e.track.key);
+    final key = e.track.key;
+    final left = counts.update(key, (n) => n - 1, ifAbsent: () => 0);
+    if (left <= 0) {
+      // No listens remain — drop every aggregate so stale rows can't keep
+      // surfacing this track in rediscover()/mostPlayed() with a 0 count.
+      counts.remove(key);
+      firstListen.remove(key);
+      lastListen.remove(key);
+      _byKey.remove(key);
+    } else {
+      // Recompute the timestamps this deletion may have been the extreme of,
+      // from the entries still in memory.
+      var first = firstListen[key];
+      var last = lastListen[key];
+      if (first == e.at || last == e.at) {
+        int? newFirst, newLast;
+        for (final x in entries) {
+          if (x.track.key != key) continue;
+          if (newFirst == null || x.at < newFirst) newFirst = x.at;
+          if (newLast == null || x.at > newLast) newLast = x.at;
+        }
+        if (newFirst != null) firstListen[key] = newFirst;
+        if (newLast != null) lastListen[key] = newLast;
+      }
+    }
     if (e.dbId != null) {
       try {
         await _db?.db.delete('history', where: 'id = ?', whereArgs: [e.dbId]);
@@ -172,6 +213,10 @@ class HistoryService extends ChangeNotifier {
   // ── Views ───────────────────────────────────────────────────────────────────
 
   int listensOf(Track t) => counts[t.key] ?? 0;
+
+  /// Latest snapshot of every track that has ever been played — the pool
+  /// recommendations rank over.
+  List<Track> get byKeyTracks => _byKey.values.toList();
 
   /// Distinct tracks ordered by listen count (desc). [since] limits to
   /// listens after that time (for day/week/month/all-time ranges).
@@ -247,9 +292,11 @@ class HistoryService extends ChangeNotifier {
 }
 
 class HistoryEntry {
-  final int? dbId;
+  // Mutable: the entry surfaces in memory immediately; the DB row id is
+  // backfilled once the async insert completes.
+  int? dbId;
   final Track track;
   final int at; // epoch ms
 
-  const HistoryEntry({this.dbId, required this.track, required this.at});
+  HistoryEntry({this.dbId, required this.track, required this.at});
 }

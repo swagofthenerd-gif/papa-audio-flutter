@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../local_library.dart';
+import '../models.dart';
 import '../theme.dart';
 
 /// One artwork widget for every source the app plays from:
@@ -43,13 +44,15 @@ class TrackArt extends StatelessWidget {
         .round()
         .clamp(64, 1600)
         .toInt();
+    final seed = artUri ?? artPath;
+    final placeholder = ArtPlaceholder(seed: seed);
     final a = artUri;
     if (a != null && a.startsWith('localart://')) {
       return FutureBuilder<Uint8List?>(
         future: LocalLibrary.artForUri(a, size: px),
         builder: (_, snap) => snap.data != null
             ? Image.memory(snap.data!, fit: BoxFit.cover, gaplessPlayback: true)
-            : const ArtPlaceholder(),
+            : placeholder,
       );
     }
     if (a != null && a.startsWith('file:')) {
@@ -57,42 +60,90 @@ class TrackArt extends StatelessWidget {
         File.fromUri(Uri.parse(a)),
         fit: BoxFit.cover,
         cacheWidth: decodePx,
-        errorBuilder: (_, _, _) => const ArtPlaceholder(),
+        errorBuilder: (_, _, _) => placeholder,
       );
     }
     final url = (a != null && a.startsWith('http'))
         ? a
         : context.read<AppState>().bridge.artUrl(artPath, width: px);
-    if (url == null) return const ArtPlaceholder();
+    if (url == null) return placeholder;
     return CachedNetworkImage(
       imageUrl: url,
       fit: BoxFit.cover,
       memCacheWidth: decodePx,
-      placeholder: (_, _) => Container(color: PA.card),
-      errorWidget: (_, _, _) => const ArtPlaceholder(),
+      placeholder: (_, _) => const ColoredBox(color: PA.card),
+      errorWidget: (_, _, _) => placeholder,
     );
   }
 }
 
 class ArtPlaceholder extends StatelessWidget {
-  const ArtPlaceholder({super.key});
+  /// When set, the placeholder derives a stable hue from this string so art-less
+  /// tiles look intentionally designed (and distinct) rather than uniformly grey.
+  final String? seed;
+  const ArtPlaceholder({super.key, this.seed});
+
   @override
-  Widget build(BuildContext context) => Container(
-        color: PA.surfaceElevated,
-        // Icon scales with the slot so the placeholder reads correctly at any
-        // size (incl. inside the player's FittedBox-scaled morphing artwork).
-        child: LayoutBuilder(
-          builder: (_, c) {
-            final side =
-                c.hasBoundedWidth && c.hasBoundedHeight
-                    ? (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight)
-                    : 44.0;
-            return Center(
-                child: Icon(Icons.music_note,
-                    color: PA.textMuted, size: (side * 0.5).clamp(12.0, 96.0)));
-          },
-        ),
-      );
+  Widget build(BuildContext context) {
+    final s = seed;
+    final Gradient gradient;
+    if (s != null && s.isNotEmpty) {
+      final hue = (s.hashCode & 0x7fffffff) % 360;
+      final base = HSLColor.fromAHSL(1, hue.toDouble(), 0.32, 0.26).toColor();
+      final dark = HSLColor.fromAHSL(1, hue.toDouble(), 0.30, 0.14).toColor();
+      gradient = LinearGradient(
+          colors: [base, dark],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight);
+    } else {
+      gradient = LinearGradient(
+          colors: [PA.surfaceElevated, PA.surface],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight);
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(gradient: gradient),
+      // Icon scales with the slot so the placeholder reads correctly at any
+      // size (incl. inside the player's FittedBox-scaled morphing artwork).
+      child: LayoutBuilder(
+        builder: (_, c) {
+          final side = c.hasBoundedWidth && c.hasBoundedHeight
+              ? (c.maxWidth < c.maxHeight ? c.maxWidth : c.maxHeight)
+              : 44.0;
+          return Center(
+              child: Icon(Icons.music_note,
+                  color: Colors.white.withValues(alpha: 0.32),
+                  size: (side * 0.5).clamp(12.0, 96.0)));
+        },
+      ),
+    );
+  }
+}
+
+/// Cached network image with the shared placeholder — used for YouTube
+/// thumbnails (http URLs that never map to a Track/artUri).
+///
+/// [slotPx] is the logical size of the slot this fills; the image is decoded to
+/// no more than that (× devicePixelRatio, capped), so a wall of 150px cards
+/// never holds full-resolution bitmaps in memory — the difference between a
+/// smooth hours-long browse and a slow OOM crash.
+class NetworkArt extends StatelessWidget {
+  final String url;
+  final double slotPx;
+  const NetworkArt({super.key, required this.url, this.slotPx = 200});
+  @override
+  Widget build(BuildContext context) {
+    final decodePx = (slotPx * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(64, 720);
+    return CachedNetworkImage(
+      imageUrl: url,
+      fit: BoxFit.cover,
+      memCacheWidth: decodePx,
+      placeholder: (_, _) => const ColoredBox(color: PA.card),
+      errorWidget: (_, _, _) => ArtPlaceholder(seed: url),
+    );
+  }
 }
 
 class ErrorView extends StatelessWidget {
@@ -123,10 +174,149 @@ class ErrorView extends StatelessWidget {
       );
 }
 
+/// "12 songs · 48 min" for a collection subtitle. Sums track durations
+/// (seconds); hides the time part when no durations are known yet.
+String fmtCollectionMeta(List<Track> tracks) {
+  final n = tracks.length;
+  final songs = '$n ${n == 1 ? 'song' : 'songs'}';
+  final secs = tracks.fold<double>(0, (m, t) => m + t.duration);
+  if (secs <= 0) return songs;
+  final mins = (secs / 60).round();
+  if (mins < 60) return '$songs · $mins min';
+  return '$songs · ${mins ~/ 60}h ${mins % 60}m';
+}
+
 /// 215.0 → "3:35"; over an hour → "1:02:35".
 String fmtDuration(double seconds) {
   final d = Duration(seconds: seconds.round());
   String two(int n) => n.toString().padLeft(2, '0');
   if (d.inHours > 0) return '${d.inHours}:${two(d.inMinutes % 60)}:${two(d.inSeconds % 60)}';
   return '${d.inMinutes}:${two(d.inSeconds % 60)}';
+}
+
+/// 2×2 collage of distinct album arts from [tracks] (single art when fewer
+/// than four albums). Used for playlist/queue/genre cards.
+class MosaicArt extends StatelessWidget {
+  final List<Track> tracks;
+  final double size;
+  const MosaicArt({super.key, required this.tracks, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    // First track per distinct album, up to 4.
+    final reps = <Track>[];
+    final seen = <String>{};
+    for (final t in tracks) {
+      final k = t.album ?? t.artUri ?? t.artPath ?? t.key;
+      if (seen.add(k)) reps.add(t);
+      if (reps.length == 4) break;
+    }
+    if (reps.isEmpty) {
+      return SizedBox(width: size, height: size, child: const ArtPlaceholder());
+    }
+    if (reps.length < 4) {
+      final t = reps.first;
+      return TrackArt(
+          artUri: t.artUri, artPath: t.artPath, size: size, radius: 0, px: 300);
+    }
+    final half = size / 2;
+    Widget cell(Track t) => TrackArt(
+        artUri: t.artUri, artPath: t.artPath, size: half, radius: 0, px: 150);
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Column(children: [
+        Row(children: [cell(reps[0]), cell(reps[1])]),
+        Row(children: [cell(reps[2]), cell(reps[3])]),
+      ]),
+    );
+  }
+}
+
+/// A polished empty/idle placeholder: centered icon, title, optional hint line,
+/// and an optional call-to-action button. Replaces bare "No tracks" text so
+/// empty surfaces read intentionally rather than looking broken.
+class EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? hint;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.hint,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: PA.textMuted, size: 46),
+            const SizedBox(height: 14),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.w700)),
+            if (hint != null) ...[
+              const SizedBox(height: 6),
+              Text(hint!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: PA.textSecondary, fontSize: 13)),
+            ],
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 18),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: PA.accent,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12)),
+                onPressed: onAction,
+                child: Text(actionLabel!),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tactile tap-down shrink (Apple/Namida feel): the child scales to ~0.96 while
+/// pressed and springs back on release. Wrap any tappable card/tile with it.
+class PressScale extends StatefulWidget {
+  final Widget child;
+  final double pressed;
+  const PressScale({super.key, required this.child, this.pressed = 0.96});
+  @override
+  State<PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<PressScale> {
+  double _scale = 1;
+  void _set(double v) {
+    if (_scale != v) setState(() => _scale = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(widget.pressed),
+      onPointerUp: (_) => _set(1),
+      onPointerCancel: (_) => _set(1),
+      child: AnimatedScale(
+        scale: _scale,
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
 }

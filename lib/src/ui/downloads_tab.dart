@@ -20,7 +20,7 @@ class DownloadsTab extends StatefulWidget {
 class _DownloadsTabState extends State<DownloadsTab> {
   Timer? _poll;
   List<dynamic> _transfers = [];
-  ValueListenable<TickerModeData>? _visible; // TickerMode notifier from the shell
+  ValueListenable<bool>? _visible; // TickerMode notifier from the shell
   AppLifecycleListener? _lifecycle;
 
   @override
@@ -38,12 +38,12 @@ class _DownloadsTabState extends State<DownloadsTab> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _visible?.removeListener(_syncPolling);
-    _visible = TickerMode.getValuesNotifier(context)..addListener(_syncPolling);
+    _visible = TickerMode.getNotifier(context)..addListener(_syncPolling);
     _syncPolling();
   }
 
   void _syncPolling() {
-    final shouldRun = _visible?.value.enabled ?? false;
+    final shouldRun = _visible?.value ?? false;
     if (shouldRun && _poll == null) {
       _refreshTransfers();
       _poll = Timer.periodic(
@@ -118,8 +118,11 @@ class _DownloadsTabState extends State<DownloadsTab> {
                             height: 22,
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: PA.accent)))),
-                title: Text(item.key.split(RegExp(r'[\\/]')).last,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: Text(
+                    dm.inFlight[item.key]?.title ??
+                        item.key.split(RegExp(r'[\\/]')).last,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
                 subtitle: LinearProgressIndicator(
                     value: item.value > 0 ? item.value : null,
                     color: PA.accent,

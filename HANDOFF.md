@@ -102,6 +102,36 @@ emulator, build + push + drop the APK on the Desktop, then start the next.
   handling, shuffle-behavior setting…), then W3 (tag editor, M3U, smart
   playlists, history calendar, lyrics fullscreen…).
 
+### YouTube findings (2026-07-18 session, live-verified)
+
+- **/player clients**: web-style headers (`origin`/`x-origin`/`x-goog-authuser`
+  from `auth.headers()`) make native clients 400 — send only content-type +
+  the client's UA. IOS identities age out (400 FAILED_PRECONDITION); current
+  working set in `innertube.dart`: IOS 20.10.4 (full device fields),
+  ANDROID_VR 1.62.27. `/player` for native clients goes to **www**.youtube.com
+  (music host 400s them). ANDROID_MUSIC anonymously = LOGIN_REQUIRED, so it
+  only leads when signed in.
+- **googlevideo fetches**: must send the *same UA* as the resolving client and
+  must be **bounded ranges ≤ ~1 MB** — unranged, open-ended (`bytes=0-`) and
+  over-large ranges all 403. Playback + downloads fetch sequential 1 MB chunks
+  (`YtLazyAudioSource`, `downloads.downloadYt`).
+- **PO-token wall**: anonymous IOS/ANDROID URLs only serve bytes 0–~1 MB
+  (≈60 s of opus) — requests starting past 1 MB 403 even on a fresh URL.
+  ANDROID_VR URLs are complete (unranged full download OK), but VR gets
+  bot-gated ("Sign in to confirm you're not a bot") per-IP/per-video; after
+  heavy testing this session the emulator IP was VR-gated for everything.
+  Net: anonymous playback = full when VR resolves, ~60 s preview otherwise.
+  Real fix would be botguard PO-token generation (multi-day); signed-in
+  ANDROID_MUSIC is the supported full-playback path.
+- **Login**: Google blocks embedded-webview sign-in regardless of UA
+  (Firefox UA did not help). Fallback shipped: "Paste cookies" in
+  YtLoginScreen — user copies the Cookie header from a signed-in
+  music.youtube.com tab (DevTools → Network) and pastes; parsed into
+  YtAuth.setCookies (needs SAPISID).
+- **Search**: YT Music search dropped `musicShelfRenderer`; results are now
+  `musicCardShelfRenderer` (top result) + `itemSectionRenderer` sections of
+  bare `musicResponsiveListItemRenderer`s — parseShelves handles both.
+
 Emulator quirks seen this session: it silently dies mid-session (adb
 "device offline"/"error: closed" → no devices) — happened 4+ times, more
 frequent late in the session; restart with the Start-Process recipe above
@@ -110,6 +140,35 @@ stylus" system dialog once swallowed taps — dismiss via its Cancel button.
 `adb shell input keyevent 4` (back) exits the app from its root screen;
 prefer `am start -n com.shaharyar.papa_audio/.MainActivity` to relaunch
 (monkey sometimes races the shade).
+
+## Session 2026-07-19 (Linux box, commit `d9e0593`)
+
+Three waves shipped on branch `claude/project-changes-review-zgqc3y`:
+
+1. **Home-after-sign-in fix** (`6829e7a`): home cache is now auth-keyed
+   (`signedIn` in the blob — mismatched cache is never painted), sign-in/out
+   no longer blanks the shelves before the refetch, anonymous home is fetched
+   too (previously signed-out users got no YT shelves at all), empty-parse →
+   `homeError` + inline Retry row, refreshing-empty → skeleton. Parser gained
+   `musicImmersiveCarouselShelfRenderer` and logs skipped shelf-shaped
+   renderers (`[yt] parseShelves`) — check logcat on a signed-in device to
+   find any renderer still unhandled (emulator has no cookies).
+2. **Namida-style player rework** (`9375baf`): spring-simulation
+   expand/collapse with velocity carry + parallax; swipeable artwork carousel
+   in the full player (neighbors from new `PlayerService.effectiveNextTrack/
+   effectivePreviousTrack`, shuffle/loop-aware; carousel mounts only at
+   t==1 so the morph stays single-art); drag-up in-player queue panel
+   (`_q` controller; `QueuePanel` extracted, shared with the modal sheet);
+   pseudo-blur backdrop (px:32 art stretched, no ImageFiltered); marquee
+   titles; press-scale transport; seekbar grows while scrubbing.
+3. **Mini player on every screen** (`d9e0593`): nested content `Navigator`
+   (`Shell.contentNav`) — pushed screens slide under the mini bar + nav bar.
+   Overlay-initiated pushes route via `Shell.contentContext(ctx)`
+   (music_hub.openAlbum/openArtist, equalizer). ONE central PopScope in
+   Shell (queue panel → expanded player → nested pop → SystemNavigator.pop);
+   PlayerSheet registers `PlayerSheet.backHandler` and must NOT own its own
+   PopScope (split PopScopes double-fire on one back press). All verified on
+   emulator including the full back chain.
 
 ## Verification recipe per wave
 

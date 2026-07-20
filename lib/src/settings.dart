@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'text_norm.dart';
+import 'theme.dart';
 
 /// User-tunable behavior, persisted with shared_preferences. Kept intentionally
 /// small: every entry here must be surfaced in the settings screen.
@@ -21,6 +22,13 @@ class SettingsService extends ChangeNotifier {
 
   /// Tint the expanded player with the current artwork's dominant color.
   bool dynamicColors = true;
+
+  /// Pure-black surfaces for OLED screens.
+  bool amoled = false;
+
+  /// ListenBrainz scrobbling — submit listens to listenbrainz.org.
+  bool scrobbleEnabled = false;
+  String listenBrainzToken = '';
 
   // Listen counting: fixed seconds, or a percentage of the track's duration.
   int listenSeconds = 20;
@@ -87,9 +95,18 @@ class SettingsService extends ChangeNotifier {
     artistBeforeTitle = p.getBool('s.artistBeforeTitle') ?? false;
     transitionFadeSec = p.getInt('s.transitionFadeSec') ?? 0;
     dynamicColors = p.getBool('s.dynamicColors') ?? true;
+    amoled = p.getBool('s.amoled') ?? false;
+    PA.applyAmoled(amoled);
+    scrobbleEnabled = p.getBool('s.scrobbleEnabled') ?? false;
+    listenBrainzToken = p.getString('s.lbToken') ?? '';
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
     genreSeparators = p.getStringList('s.genreSeps') ?? genreSeparators;
     splitBlacklist = p.getStringList('s.splitBlacklist') ?? splitBlacklist;
+    // Drop any splitter built from defaults before persisted separators loaded,
+    // and bump revision so splitter-memoized groupings recompute.
+    _artistSplitter = null;
+    _genreSplitter = null;
+    revision++;
     notifyListeners();
   }
 
@@ -98,6 +115,7 @@ class SettingsService extends ChangeNotifier {
 
   void update(void Function() change) {
     change();
+    PA.applyAmoled(amoled); // apply appearance changes before the rebuild
     _artistSplitter = null; // separator/blacklist edits rebuild the splitters
     _genreSplitter = null;
     revision++;
@@ -121,6 +139,9 @@ class SettingsService extends ChangeNotifier {
     p.setBool('s.artistBeforeTitle', artistBeforeTitle);
     p.setInt('s.transitionFadeSec', transitionFadeSec);
     p.setBool('s.dynamicColors', dynamicColors);
+    p.setBool('s.amoled', amoled);
+    p.setBool('s.scrobbleEnabled', scrobbleEnabled);
+    p.setString('s.lbToken', listenBrainzToken);
     p.setStringList('s.artistSeps', artistSeparators);
     p.setStringList('s.genreSeps', genreSeparators);
     p.setStringList('s.splitBlacklist', splitBlacklist);

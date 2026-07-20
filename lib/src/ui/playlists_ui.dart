@@ -130,8 +130,12 @@ class PlaylistScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: s.playlists,
       builder: (context, _) {
-        // The playlist may have been deleted while this screen is open.
+        // The playlist may have been deleted while this screen is open — pop
+        // back to where the user came from instead of showing a blank screen.
         if (!s.playlists.playlists.any((p) => p.id == playlist.id)) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) Navigator.of(context).maybePop();
+          });
           return const Scaffold(body: SizedBox.shrink());
         }
         return Scaffold(
@@ -174,6 +178,16 @@ class PlaylistScreen extends StatelessWidget {
           ),
           body: Column(
             children: [
+              if (playlist.tracks.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(fmtCollectionMeta(playlist.tracks),
+                        style:
+                            const TextStyle(color: PA.textMuted, fontSize: 12)),
+                  ),
+                ),
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -183,15 +197,17 @@ class PlaylistScreen extends StatelessWidget {
               ),
               Expanded(
                 child: playlist.tracks.isEmpty
-                    ? const Center(
-                        child: Text('No tracks yet — use “Add to playlist” on any track',
-                            style: TextStyle(
-                                color: PA.textSecondary, fontSize: 13)))
+                    ? const EmptyState(
+                        icon: Icons.queue_music_outlined,
+                        title: 'No tracks yet',
+                        hint: 'Use “Add to playlist” on any track to build it up.')
                     : ReorderableListView.builder(
                         padding: const EdgeInsets.only(bottom: 80),
                         itemCount: playlist.tracks.length,
-                        onReorderItem: (from, to) =>
-                            s.playlists.reorder(playlist, from, to),
+                        onReorder: (from, to) {
+                          if (to > from) to -= 1; // ReorderableListView convention
+                          s.playlists.reorder(playlist, from, to);
+                        },
                         itemBuilder: (_, i) {
                           final t = playlist.tracks[i];
                           return Dismissible(
@@ -204,8 +220,24 @@ class PlaylistScreen extends StatelessWidget {
                               child:
                                   const Icon(Icons.delete, color: Colors.white),
                             ),
-                            onDismissed: (_) =>
-                                s.playlists.removeAt(playlist, i),
+                            onDismissed: (_) {
+                              final removed = t;
+                              final at = i;
+                              s.playlists.removeAt(playlist, at);
+                              ScaffoldMessenger.of(context)
+                                ..clearSnackBars()
+                                ..showSnackBar(SnackBar(
+                                  content: Text('Removed ${removed.title}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                  behavior: SnackBarBehavior.floating,
+                                  action: SnackBarAction(
+                                    label: 'Undo',
+                                    onPressed: () => s.playlists
+                                        .insertAt(playlist, at, removed),
+                                  ),
+                                ));
+                            },
                             child: TrackTile(
                               track: t,
                               swipeActions: false,
@@ -255,9 +287,10 @@ class QueuesView extends StatelessWidget {
               .toList();
         }
         if (queues.isEmpty) {
-          return const Center(
-              child: Text('Queues you play are archived here',
-                  style: TextStyle(color: PA.textSecondary)));
+          return const EmptyState(
+              icon: Icons.history_toggle_off_outlined,
+              title: 'No saved queues',
+              hint: 'Queues you play are archived here automatically.');
         }
         return ListView.builder(
           padding: const EdgeInsets.only(bottom: 80),
@@ -274,7 +307,19 @@ class QueuesView extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 20),
                 child: const Icon(Icons.delete, color: Colors.white),
               ),
-              onDismissed: (_) => s.queues.delete(q),
+              onDismissed: (_) {
+                s.queues.delete(q);
+                ScaffoldMessenger.of(context)
+                  ..clearSnackBars()
+                  ..showSnackBar(SnackBar(
+                    content: const Text('Queue removed'),
+                    behavior: SnackBarBehavior.floating,
+                    action: SnackBarAction(
+                      label: 'Undo',
+                      onPressed: () => s.queues.restore(q),
+                    ),
+                  ));
+              },
               child: ListTile(
                 leading: TrackArt(
                     artUri: first.artUri,

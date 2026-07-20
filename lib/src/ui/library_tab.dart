@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
@@ -10,6 +11,7 @@ import '../player_service.dart';
 import '../text_norm.dart';
 import '../theme.dart';
 import 'collection_menu.dart';
+import 'music_hub.dart';
 import 'playlists_ui.dart';
 import 'selection_bar.dart';
 import 'settings_screen.dart';
@@ -328,7 +330,9 @@ class _TracksViewState extends State<_TracksView>
     _recompute(s);
     final tracks = _tracks;
     final letterIndex = _letterIndex;
-    if (tracks.isEmpty) return const _Empty('No tracks');
+    if (tracks.isEmpty) {
+      return const _Empty('No tracks', icon: Icons.music_note_outlined);
+    }
 
     final alphaSort =
         widget.sort == TrackSort.title || widget.sort == TrackSort.artist;
@@ -494,7 +498,7 @@ class _AlbumsView extends StatelessWidget {
           .where((a) => blobMatches(normText('${a.name} ${a.artist}'), query))
           .toList();
     }
-    if (albums.isEmpty) return const _Empty('No albums');
+    if (albums.isEmpty) return const _Empty('No albums', icon: Icons.album_outlined);
     final columns = context.read<AppState>().settings.gridColumns;
     return GridView.builder(
       padding: const EdgeInsets.all(12),
@@ -596,8 +600,29 @@ class LocalAlbumScreen extends StatelessWidget {
                   Text(album.name,
                       style: const TextStyle(
                           fontSize: 22, fontWeight: FontWeight.bold)),
-                  Text(album.artist,
-                      style: const TextStyle(color: PA.textSecondary)),
+                  // Tap the artist to open their page — deep-dive navigation.
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => openArtistName(
+                        context, context.read<AppState>(), album.artist),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(album.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: PA.textSecondary)),
+                        ),
+                        const Icon(Icons.chevron_right,
+                            size: 18, color: PA.textMuted),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(fmtCollectionMeta(album.tracks),
+                      style: const TextStyle(
+                          color: PA.textMuted, fontSize: 12)),
                   const SizedBox(height: 12),
                   PlayShuffleRow(
                       tracks: album.tracks,
@@ -642,9 +667,101 @@ class LocalAlbumScreen extends StatelessWidget {
               );
             },
           ),
+          // "More like this" — other albums by the same artist, then the same
+          // genre, from your library.
+          SliverToBoxAdapter(child: _MoreLikeAlbum(album: album)),
           const SliverToBoxAdapter(child: SizedBox(height: 80)),
         ],
       ),
+    );
+  }
+}
+
+/// Related-albums shelf for the local album page: same artist first, then the
+/// same genre, drawn from the on-device library. Hidden when nothing relates.
+class _MoreLikeAlbum extends StatelessWidget {
+  final LocalAlbum album;
+  const _MoreLikeAlbum({required this.album});
+
+  @override
+  Widget build(BuildContext context) {
+    final lib = context.read<AppState>().localLibrary;
+    final artistNorm = normText(album.artist);
+    final myGenres = <String>{
+      for (final t in album.tracks)
+        if (t.genre != null && t.genre!.isNotEmpty) normText(t.genre!)
+    };
+    final sameArtist = <LocalAlbum>[];
+    final sameGenre = <LocalAlbum>[];
+    for (final a in lib.albums) {
+      if (a.albumId == album.albumId) continue;
+      if (normText(a.artist) == artistNorm) {
+        sameArtist.add(a);
+      } else if (myGenres.isNotEmpty &&
+          a.tracks.any((t) =>
+              t.genre != null && myGenres.contains(normText(t.genre!)))) {
+        sameGenre.add(a);
+      }
+    }
+    final related = [...sameArtist, ...sameGenre];
+    if (related.isEmpty) return const SizedBox.shrink();
+    final title = sameArtist.isNotEmpty
+        ? 'More from ${album.artist}'
+        : 'More like this';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+          child: Text(title,
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3)),
+        ),
+        SizedBox(
+          height: 190,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: related.length.clamp(0, 20),
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (_, i) {
+              final a = related[i];
+              return GestureDetector(
+                onTap: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => LocalAlbumScreen(album: a))),
+                child: SizedBox(
+                  width: 140,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(PA.rMd),
+                        child: TrackArt(
+                            artUri: 'localart://${a.artTrackId}/${a.albumId}',
+                            size: 140,
+                            px: 300),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(a.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 13)),
+                      Text(a.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: PA.textSecondary, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -721,7 +838,7 @@ class _ArtistsViewState extends State<_ArtistsView> {
       },
     );
     final byArtist = _cache.groups;
-    if (names.isEmpty) return const _Empty('No artists');
+    if (names.isEmpty) return const _Empty('No artists', icon: Icons.person_outline);
     return ListView.builder(
       itemCount: names.length,
       itemBuilder: (_, i) {
@@ -788,7 +905,8 @@ class _GenresViewState extends State<_GenresView> {
     final byGenre = _cache.groups;
     if (names.isEmpty) {
       return const _Empty(
-          'No genres — genre tags need Android 11+ to be indexed');
+          'No genres — genre tags need Android 11+ to be indexed',
+          icon: Icons.category_outlined);
     }
     return ListView.builder(
       itemCount: names.length,
@@ -796,14 +914,10 @@ class _GenresViewState extends State<_GenresView> {
         final name = names[i];
         final tracks = byGenre[name]!;
         return ListTile(
-          leading: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: PA.card,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: const Icon(Icons.piano, color: PA.textSecondary, size: 22),
+          // Collage of the genre's album arts, Namida-style.
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: MosaicArt(tracks: tracks, size: 44),
           ),
           title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text('${tracks.length} tracks',
@@ -873,7 +987,7 @@ class _FoldersViewState extends State<_FoldersView> {
     _recompute(widget.lib, widget.query);
     final byFolder = _byFolder;
     final dirs = _dirs;
-    if (dirs.isEmpty) return const _Empty('No folders');
+    if (dirs.isEmpty) return const _Empty('No folders', icon: Icons.folder_outlined);
     return ListView.builder(
       itemCount: dirs.length,
       itemBuilder: (_, i) {
@@ -937,6 +1051,13 @@ class TrackListScreen extends StatefulWidget {
 class _TrackListScreenState extends State<TrackListScreen> {
   bool _searching = false;
   String _query = '';
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -976,22 +1097,151 @@ class _TrackListScreenState extends State<TrackListScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(fmtCollectionMeta(tracks),
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: PlayShuffleRow(
                 tracks: tracks, collectionId: widget.collectionId),
           ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.only(bottom: 80),
-              itemCount: tracks.length,
-              itemBuilder: (_, i) => TrackTile(
-                  track: tracks[i],
-                  onTap: () => s.playTrackInList(tracks, i,
-                      collectionId: widget.collectionId)),
+            child: JumpToTrackPill(
+              scroll: _scroll,
+              tracks: tracks,
+              child: ListView.builder(
+                controller: _scroll,
+                padding: const EdgeInsets.only(bottom: 80),
+                itemCount: tracks.length,
+                itemBuilder: (_, i) => TrackTile(
+                    track: tracks[i],
+                    onTap: () => s.playTrackInList(tracks, i,
+                        collectionId: widget.collectionId)),
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Namida-style floating pill: appears while scrolling a long track list and
+/// jumps to the now-playing track. Its icon reflects whether that track is
+/// above or below the current viewport (or a disc when already in view).
+/// Assumes a uniform ~64px row height (TrackTile).
+class JumpToTrackPill extends StatefulWidget {
+  final ScrollController scroll;
+  final List<Track> tracks;
+  final Widget child;
+  const JumpToTrackPill(
+      {super.key,
+      required this.scroll,
+      required this.tracks,
+      required this.child});
+
+  @override
+  State<JumpToTrackPill> createState() => _JumpToTrackPillState();
+}
+
+class _JumpToTrackPillState extends State<JumpToTrackPill> {
+  static const _rowH = 64.0;
+  bool _visible = false;
+  Timer? _hide;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scroll.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _hide?.cancel();
+    widget.scroll.removeListener(_onScroll);
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_visible) setState(() => _visible = true);
+    _hide?.cancel();
+    _hide = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  int _currentRow(AppState s) {
+    final cur = s.playerService.currentTrack;
+    if (cur == null) return -1;
+    return widget.tracks.indexWhere((t) => t.key == cur.key);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.read<AppState>();
+    return Stack(
+      children: [
+        widget.child,
+        Positioned(
+          right: 12,
+          bottom: 16,
+          child: AnimatedScale(
+            scale: _visible ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutBack,
+            child: AnimatedBuilder(
+              animation: s.playerService.queueRevision,
+              builder: (_, _) {
+                final row = _currentRow(s);
+                if (row < 0) return const SizedBox.shrink();
+                IconData icon = Icons.album;
+                if (widget.scroll.hasClients) {
+                  final target = row * _rowH;
+                  final off = widget.scroll.offset;
+                  if (target < off - _rowH) icon = Icons.keyboard_arrow_up;
+                  else if (target > off + _rowH * 4) {
+                    icon = Icons.keyboard_arrow_down;
+                  }
+                }
+                return Material(
+                  color: PA.accent,
+                  shape: const StadiumBorder(),
+                  elevation: 4,
+                  child: InkWell(
+                    customBorder: const StadiumBorder(),
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      widget.scroll.animateTo(
+                        (row * _rowH)
+                            .clamp(0.0, widget.scroll.position.maxScrollExtent),
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeOutCubic,
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(icon, size: 18, color: Colors.black),
+                        const SizedBox(width: 4),
+                        const Text('Playing',
+                            style: TextStyle(
+                                color: Colors.black,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1064,11 +1314,10 @@ class PlayShuffleRow extends StatelessWidget {
 
 class _Empty extends StatelessWidget {
   final String message;
-  const _Empty(this.message);
+  final IconData icon;
+  const _Empty(this.message, {this.icon = Icons.library_music_outlined});
   @override
-  Widget build(BuildContext context) => Center(
-      child:
-          Text(message, style: const TextStyle(color: PA.textSecondary)));
+  Widget build(BuildContext context) => EmptyState(icon: icon, title: message);
 }
 
 class _PermissionPrompt extends StatelessWidget {

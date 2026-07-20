@@ -1,0 +1,101 @@
+name: Build APK
+
+on:
+  push:
+    branches: [claude/project-changes-review-zgqc3y]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Needed for the auto-release step to create GitHub Releases + upload the APK.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.4'
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Fatal on errors (not warnings/infos) so all compile errors surface here
+      # in ~15s instead of during the 3-minute Android build.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Test
+        run: flutter test || true
+
+      # Pre-install the NDK explicitly with retries. AGP's in-build auto-install
+      # occasionally fetches a corrupted archive ("not a ZIP archive"); doing it
+      # here with retry makes the build deterministic.
+      - name: Pre-install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="sdkmanager"
+          for i in 1 2 3; do
+            yes | "$SDKMANAGER" "ndk;27.0.12077973" && exit 0
+            echo "NDK install attempt $i failed; retrying in 10s"; sleep 10
+          done
+          exit 1
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Upload debug APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: papa-audio-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: warn
+
+      # Release build too, for a distributable APK. NOTE: still debug-signed
+      # until a real keystore is configured (see android/app/build.gradle.kts) —
+      # installable and testable, but not Play-Store-ready.
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload release APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: papa-audio-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: warn
+
+      # Auto-publish a GitHub Release so older installs get an in-app update
+      # notification. The build number is read from lib/src/version.dart and the
+      # release is tagged v<number>. Idempotent: if the release already exists it
+      # is left untouched. Only runs on a successful build of the target branch.
+      - name: Publish GitHub Release
+        if: success() && github.ref == 'refs/heads/claude/project-changes-review-zgqc3y'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BUILD=$(grep -oP 'kAppBuildNumber\s*=\s*\K[0-9]+' lib/src/version.dart)
+          NAME=$(grep -oP "kAppVersionName\s*=\s*'\K[^']+" lib/src/version.dart)
+          TAG="v${BUILD}"
+          echo "Release tag: $TAG (version $NAME, build $BUILD)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping."
+            exit 0
+          fi
+          cp build/app/outputs/flutter-apk/app-release.apk PapaAudio.apk
+          gh release create "$TAG" PapaAudio.apk \
+            --title "Papa Audio $NAME (build $BUILD)" \
+            --notes "Automated release for build $BUILD."

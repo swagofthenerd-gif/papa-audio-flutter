@@ -59,6 +59,14 @@ class MainActivity : AudioServiceActivity() {
         requestHighRefreshRate()
     }
 
+    override fun onDestroy() {
+        // Release the worker pools so a destroyed activity (and any in-flight
+        // decode holding a reference to it) doesn't leak across recreation.
+        executor.shutdownNow()
+        waveformExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
     /**
      * Ask for the display's fastest mode at the current resolution (90/120Hz
      * panels default some apps to 60) — scrolling and the player morph animate
@@ -113,6 +121,14 @@ class MainActivity : AudioServiceActivity() {
                         val buckets = call.argument<Number>("buckets")?.toInt() ?: 96
                         runOnWaveformThread(result) { extractWaveform(uri, buckets) }
                     }
+                    "audioFormat" -> {
+                        val uri = call.argument<String>("uri") ?: ""
+                        runAsync(result) { extractFormat(uri) }
+                    }
+                    "installApk" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        mainHandler.post { installApk(path, result) }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -145,6 +161,89 @@ class MainActivity : AudioServiceActivity() {
     // Decodes the whole file to PCM once and keeps the peak amplitude per time
     // bucket. Runs on its own worker; Dart caches the result in SQLite so each
     // track ever pays this cost once.
+
+    /** Hand a downloaded APK to the system package installer via FileProvider.
+     *  The user confirms the install in Android's own UI. */
+    private fun installApk(path: String, result: MethodChannel.Result) {
+        try {
+            val file = java.io.File(path)
+            if (!file.exists()) {
+                result.error("install", "APK not found", null)
+                return
+            }
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", file)
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("install", e.message, null)
+        }
+    }
+
+    /** Probe a track's audio format for the "now playing" quality readout:
+     *  mime, sample rate, channels, and PCM bit depth when the container
+     *  reports it (FLAC/WAV). Bitrate is read from MediaFormat when present,
+     *  else estimated from file size / duration. Runs per-track, on demand. */
+    private fun extractFormat(uriStr: String): Map<String, Any>? {
+        if (uriStr.isEmpty()) return null
+        val extractor = MediaExtractor()
+        try {
+            if (uriStr.startsWith("content://")) {
+                extractor.setDataSource(this, Uri.parse(uriStr), null)
+            } else {
+                extractor.setDataSource(uriStr.removePrefix("file://"))
+            }
+            var format: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    format = f
+                    break
+                }
+            }
+            val fmt = format ?: return null
+            val out = HashMap<String, Any>()
+            fmt.getString(MediaFormat.KEY_MIME)?.let { out["mime"] = it }
+            if (fmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                out["sampleRate"] = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            }
+            if (fmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                out["channels"] = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            }
+            var bitrate = 0
+            if (fmt.containsKey(MediaFormat.KEY_BIT_RATE)) {
+                bitrate = fmt.getInteger(MediaFormat.KEY_BIT_RATE)
+            }
+            // PCM encoding → bit depth (16 / 24 / 32-float) for lossless.
+            if (fmt.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                out["bitDepth"] = when (fmt.getInteger(MediaFormat.KEY_PCM_ENCODING)) {
+                    android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED -> 24
+                    android.media.AudioFormat.ENCODING_PCM_32BIT -> 32
+                    android.media.AudioFormat.ENCODING_PCM_FLOAT -> 32
+                    else -> 16
+                }
+            }
+            // Estimate bitrate from size/duration when the container omits it
+            // (common for FLAC/lossless).
+            val durationUs = if (fmt.containsKey(MediaFormat.KEY_DURATION))
+                fmt.getLong(MediaFormat.KEY_DURATION) else 0L
+            if (bitrate <= 0 && durationUs > 0 && !uriStr.startsWith("content://")) {
+                val size = java.io.File(uriStr.removePrefix("file://")).length()
+                if (size > 0) bitrate = ((size * 8.0) / (durationUs / 1_000_000.0)).toInt()
+            }
+            if (bitrate > 0) out["bitrate"] = bitrate
+            return out
+        } catch (e: Exception) {
+            return null
+        } finally {
+            extractor.release()
+        }
+    }
 
     private fun extractWaveform(uriStr: String, buckets: Int): List<Double>? {
         if (uriStr.isEmpty() || buckets <= 4) return null
@@ -179,7 +278,13 @@ class MainActivity : AudioServiceActivity() {
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false
+            // A corrupt/DRM stream can leave the decoder returning only
+            // TRY_AGAIN forever; since this runs on a single shared worker, one
+            // bad file would wedge all future waveform requests. Bail after a
+            // wall-clock cap so the worker is never permanently blocked.
+            val deadline = System.currentTimeMillis() + 20_000
             while (!outputDone) {
+                if (System.currentTimeMillis() > deadline) return null
                 if (!inputDone) {
                     val inIdx = codec.dequeueInputBuffer(5000)
                     if (inIdx >= 0) {
@@ -246,7 +351,14 @@ class MainActivity : AudioServiceActivity() {
             return
         }
         pendingPermissionResult = result
-        requestPermissions(arrayOf(audioPermission), REQ_AUDIO)
+        // On Android 13+ also ask for POST_NOTIFICATIONS in the same prompt so
+        // the media-playback notification/lock-screen controls can show.
+        val perms = if (Build.VERSION.SDK_INT >= 33) {
+            arrayOf(audioPermission, Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            arrayOf(audioPermission)
+        }
+        requestPermissions(perms, REQ_AUDIO)
     }
 
     override fun onRequestPermissionsResult(

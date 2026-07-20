@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../main.dart' show AlbumScreen, Shell;
 import '../app_state.dart';
 import '../models.dart';
 import '../text_norm.dart';
@@ -10,6 +11,7 @@ import 'library_tab.dart';
 import 'selection_bar.dart';
 import 'track_tile.dart';
 import 'widgets.dart';
+import 'yt_browse_screen.dart';
 
 /// Spotify-style "go to artist/album" landing: one scroll with labeled
 /// sections in fixed order — YouTube, From your PC, On this phone — each
@@ -105,16 +107,20 @@ class MusicHubScreen extends StatelessWidget {
 
 /// Opens the most specific destination for a track's album: the matching
 /// local album screen, else the matching PC album screen, else the hub.
+/// Routes into the Shell's content navigator so the mini player stays
+/// visible — these are called from overlays (player sheet, modal menus)
+/// whose own context resolves to the root navigator.
 void openAlbum(BuildContext context, AppState s, Track t) {
   final albumName = t.album;
   if (albumName == null || albumName.trim().isEmpty) {
     openArtist(context, s, t);
     return;
   }
+  final ctx = Shell.contentContext(context);
   final norm = normText(albumName);
   for (final a in s.localLibrary.albums) {
     if (normText(a.name) == norm) {
-      Navigator.push(context,
+      Navigator.push(ctx,
           MaterialPageRoute(builder: (_) => LocalAlbumScreen(album: a)));
       return;
     }
@@ -122,7 +128,7 @@ void openAlbum(BuildContext context, AppState s, Track t) {
   // PC album screens live in main.dart; route through the hub instead of
   // importing across entrypoints — the hub lists matching PC albums anyway.
   Navigator.push(
-      context,
+      ctx,
       MaterialPageRoute(
           builder: (_) => MusicHubScreen(query: albumName, title: albumName)));
 }
@@ -130,10 +136,22 @@ void openAlbum(BuildContext context, AppState s, Track t) {
 void openArtist(BuildContext context, AppState s, Track t) {
   // First split artist is the primary credit.
   final artist = s.settings.artistSplitter.split(t.artist).firstOrNull ?? t.artist;
+  openArtistName(context, s, artist);
+}
+
+/// Open an artist page by name — used by every "tap the artist" affordance
+/// (player, album screens, track menus). Routes through the shell content
+/// navigator so deep chains (album → artist → album …) stack under the mini
+/// player and the back button walks them.
+void openArtistName(BuildContext context, AppState s, String name) {
+  final artist = s.settings.artistSplitter.split(name).firstOrNull ?? name;
+  if (artist.trim().isEmpty) return;
+  // Open the real YouTube Music artist page (top songs, albums, singles,
+  // similar artists). Falls back to the local/PC hub inside the loader when
+  // the artist isn't on YouTube or we're offline.
   Navigator.push(
-      context,
-      MaterialPageRoute(
-          builder: (_) => MusicHubScreen(query: artist, title: artist)));
+      Shell.contentContext(context),
+      MaterialPageRoute(builder: (_) => YtArtistLoader(name: artist)));
 }
 
 class _HubHeader extends StatelessWidget {
@@ -231,9 +249,10 @@ class _PcAlbumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.read<AppState>();
     return GestureDetector(
-      onTap: () => s.playAlbum(album),
+      // Open the album page (deep dive) — play via its own play button.
+      onTap: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => AlbumScreen(album: album))),
       child: SizedBox(
         width: 132,
         child: Column(

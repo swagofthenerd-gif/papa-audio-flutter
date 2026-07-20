@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback, SystemNavigator;
 import 'package:provider/provider.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -10,9 +11,11 @@ import 'src/ui/collection_menu.dart';
 import 'src/ui/downloads_tab.dart';
 import 'src/ui/home_tab.dart';
 import 'src/ui/library_tab.dart';
+import 'src/ui/music_hub.dart';
 import 'src/ui/player_sheet.dart';
 import 'src/ui/search_tab.dart';
 import 'src/ui/selection_bar.dart';
+import 'src/ui/update_dialog.dart';
 import 'src/ui/track_tile.dart';
 import 'src/ui/widgets.dart';
 
@@ -39,13 +42,36 @@ class PapaApp extends StatelessWidget {
   const PapaApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Papa Audio',
-      debugShowCheckedModeBanner: false,
-      theme: papaTheme(),
-      home: const Root(),
+    final s = context.read<AppState>();
+    // Rebuild the whole app (fresh theme + PA-colored widgets) when settings
+    // that affect appearance change — the AMOLED toggle swaps PA surfaces.
+    return AnimatedBuilder(
+      animation: s.settings,
+      builder: (context, _) => MaterialApp(
+        title: 'Papa Audio',
+        debugShowCheckedModeBanner: false,
+        theme: papaTheme(),
+        // App-wide bouncy scroll (with a glow fallback for reduced-motion), so
+        // every list has the same tactile "give" Namida is known for.
+        scrollBehavior: const _PapaScrollBehavior(),
+        home: const Root(),
+      ),
     );
   }
+}
+
+/// Bouncy overscroll on all platforms. Applied globally via
+/// MaterialApp.scrollBehavior. BouncingScrollPhysics provides the "give"
+/// itself, so no separate overscroll indicator is needed.
+class _PapaScrollBehavior extends MaterialScrollBehavior {
+  const _PapaScrollBehavior();
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics());
+  @override
+  Widget buildOverscrollIndicator(
+          BuildContext context, Widget child, ScrollableDetails details) =>
+      child; // bounce handles overscroll; no glow/stretch overlay
 }
 
 class Root extends StatelessWidget {
@@ -147,19 +173,89 @@ class _SetupScreenState extends State<SetupScreen> {
 // ── Shell: pages + nav bar + the persistent player sheet overlay ─────────────
 class Shell extends StatefulWidget {
   const Shell({super.key});
+
+  /// Registered by the live shell state — lets deep leaves (e.g. a snackbar
+  /// "VIEW" action) switch the bottom tab without threading callbacks through
+  /// every screen. Tabs: 0 Home, 1 Search, 2 Library, 3 Downloads.
+  static void Function(int index)? switchTo;
+
+  /// The nested content navigator. Screens pushed here slide in UNDER the
+  /// mini player and nav bar, so the player stays visible on every screen.
+  /// Pushes from tab screens land here automatically (nearest Navigator);
+  /// code living OUTSIDE it (player sheet, modal sheets) routes through
+  /// [contentContext].
+  static final GlobalKey<NavigatorState> contentNav =
+      GlobalKey<NavigatorState>();
+
+  /// Context inside the content navigator, for pushes initiated from
+  /// overlays; falls back to the caller's own context pre-shell.
+  static BuildContext contentContext(BuildContext fallback) =>
+      contentNav.currentContext ?? fallback;
+
   @override
   State<Shell> createState() => _ShellState();
 }
 
 class _ShellState extends State<Shell> {
-  int _tab = 0;
+  final ValueNotifier<int> _tab = ValueNotifier(0);
   static const _pages = [HomeTab(), SearchTab(), LibraryTab(), DownloadsTab()];
+
+  bool _updatePrompted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Shell.switchTo = (i) {
+      if (!mounted) return;
+      Shell.contentNav.currentState?.popUntil((r) => r.isFirst);
+      _tab.value = i.clamp(0, _pages.length - 1);
+    };
+    // Check GitHub for a newer build once the UI is up; prompt if found.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final s = context.read<AppState>();
+      s.updates.addListener(_onUpdateChanged);
+      s.updates.checkForUpdate();
+    });
+  }
+
+  void _onUpdateChanged() {
+    if (!mounted || _updatePrompted) return;
+    final s = context.read<AppState>();
+    if (s.updates.available != null) {
+      _updatePrompted = true;
+      showUpdateDialog(context, s.updates);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (Shell.switchTo != null) Shell.switchTo = null;
+    context.read<AppState>().updates.removeListener(_onUpdateChanged);
+    _tab.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final ps = context.read<AppState>().playerService;
     final navHeight = 80.0 + MediaQuery.paddingOf(context).bottom;
-    return Scaffold(
+    // ONE back handler for the whole shell, in priority order: the player
+    // sheet (queue panel, then expanded player), then pushed content screens,
+    // then leave the app. Split PopScopes would all fire on a single press.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (PlayerSheet.backHandler?.call() ?? false) return;
+        final nav = Shell.contentNav.currentState;
+        if (nav != null && nav.canPop()) {
+          nav.pop();
+          return;
+        }
+        SystemNavigator.pop();
+      },
+      child: Scaffold(
       body: Stack(
         children: [
           Column(
@@ -167,15 +263,25 @@ class _ShellState extends State<Shell> {
               Expanded(
                 child: SafeArea(
                   bottom: false,
-                  // TickerMode lets hidden tabs know they're offscreen, so
-                  // they can pause timers/polling (see DownloadsTab).
-                  child: IndexedStack(
-                    index: _tab,
-                    children: [
-                      for (var i = 0; i < _pages.length; i++)
-                        TickerMode(enabled: i == _tab, child: _pages[i]),
-                    ],
-                  ),
+                  child: Navigator(
+                      key: Shell.contentNav,
+                      onGenerateRoute: (_) => MaterialPageRoute(
+                        builder: (_) => ValueListenableBuilder<int>(
+                          valueListenable: _tab,
+                          // TickerMode lets hidden tabs know they're
+                          // offscreen, so they can pause timers/polling
+                          // (see DownloadsTab).
+                          builder: (_, tab, _) => IndexedStack(
+                            index: tab,
+                            children: [
+                              for (var i = 0; i < _pages.length; i++)
+                                TickerMode(
+                                    enabled: i == tab, child: _pages[i]),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                 ),
               ),
               const SelectionBar(),
@@ -187,10 +293,17 @@ class _ShellState extends State<Shell> {
                         ? PlayerSheet.miniHeight
                         : 0),
               ),
-              NavigationBar(
+              ValueListenableBuilder<int>(
+                valueListenable: _tab,
+                builder: (_, tab, _) => NavigationBar(
                 backgroundColor: PA.surface,
-                selectedIndex: _tab,
-                onDestinationSelected: (i) => setState(() => _tab = i),
+                selectedIndex: tab,
+                onDestinationSelected: (i) {
+                  HapticFeedback.selectionClick();
+                  // Tab tap clears any pushed screen so the tab itself shows.
+                  Shell.contentNav.currentState?.popUntil((r) => r.isFirst);
+                  _tab.value = i;
+                },
                 destinations: const [
                   NavigationDestination(
                       icon: Icon(Icons.home_outlined),
@@ -207,11 +320,13 @@ class _ShellState extends State<Shell> {
                       selectedIcon: Icon(Icons.download),
                       label: 'Downloads'),
                 ],
+                ),
               ),
             ],
           ),
           Positioned.fill(child: PlayerSheet(navHeight: navHeight)),
         ],
+        ),
       ),
     );
   }
@@ -292,8 +407,24 @@ class AlbumScreen extends StatelessWidget {
                   Text(album.name,
                       style: const TextStyle(
                           fontSize: 22, fontWeight: FontWeight.bold)),
-                  Text(album.artist,
-                      style: const TextStyle(color: PA.textSecondary)),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => openArtistName(
+                        context, context.read<AppState>(), album.artist),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(album.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: PA.textSecondary)),
+                        ),
+                        const Icon(Icons.chevron_right,
+                            size: 18, color: PA.textMuted),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 10,

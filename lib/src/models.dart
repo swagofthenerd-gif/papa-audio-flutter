@@ -44,8 +44,16 @@ class Track {
     this.dateAdded = 0,
   });
 
-  factory Track.fromJson(Map<String, dynamic> j) => Track(
-        id: (j['id'] ?? j['filePath'] ?? '').toString(),
+  factory Track.fromJson(Map<String, dynamic> j) {
+    final id = (j['id'] ?? j['filePath'] ?? '').toString();
+    var artUri = j['artUri']?.toString();
+    // Heal YT tracks persisted before thumbnails were guaranteed — every
+    // video has a ytimg still, so restored queues never show placeholder art.
+    if (artUri == null && id.startsWith('yt:')) {
+      artUri = 'https://i.ytimg.com/vi/${id.substring(3)}/hqdefault.jpg';
+    }
+    return Track(
+        id: id,
         title: (j['title'] ?? 'Unknown').toString(),
         artist: (j['artist'] ?? 'Unknown Artist').toString(),
         album: j['album']?.toString(),
@@ -59,11 +67,12 @@ class Track {
             : int.tryParse('${j['discNumber']}') ?? 1,
         duration: (j['duration'] ?? 0).toDouble(),
         sourceUri: j['sourceUri']?.toString(),
-        artUri: j['artUri']?.toString(),
+        artUri: artUri,
         year: (j['year'] as num?)?.toInt() ?? 0,
         genre: j['genre']?.toString(),
         dateAdded: (j['dateAdded'] as num?)?.toInt() ?? 0,
       );
+  }
 
   /// Round-trips through fromJson — used by playlists/history/queue persistence.
   Map<String, dynamic> toJson() => {

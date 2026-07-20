@@ -18,6 +18,16 @@ class PlaylistsService extends ChangeNotifier {
   List<Track> get favorites => _favoriteTracks;
   bool isFavorite(Track t) => _favoriteKeys.contains(t.key);
 
+  /// Bumped on every change so views (and recommendations) can memoize
+  /// playlist/favorite-derived data instead of recomputing on every rebuild.
+  int revision = 0;
+
+  @override
+  void notifyListeners() {
+    revision++;
+    super.notifyListeners();
+  }
+
   Future<void> init(AppDatabase db) async {
     _db = db;
     try {
@@ -82,9 +92,13 @@ class PlaylistsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  int _plSeq = 0;
+
   Future<Playlist> create(String name) async {
+    // A bare millisecond id collides when two playlists are created in the same
+    // millisecond (e.g. a scripted import loop); a monotonic suffix disambiguates.
     final p = Playlist(
-      id: 'pl_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'pl_${DateTime.now().millisecondsSinceEpoch}_${_plSeq++}',
       name: name.trim().isEmpty ? 'Playlist ${playlists.length + 1}' : name.trim(),
       tracks: [],
       createdAt: DateTime.now().millisecondsSinceEpoch,
@@ -155,6 +169,14 @@ class PlaylistsService extends ChangeNotifier {
   Future<void> removeAt(Playlist p, int index) async {
     if (index < 0 || index >= p.tracks.length) return;
     p.tracks.removeAt(index);
+    p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+    await _rewriteTracks(p);
+  }
+
+  /// Re-insert a track at [index] (used to undo a [removeAt]).
+  Future<void> insertAt(Playlist p, int index, Track t) async {
+    p.tracks.insert(index.clamp(0, p.tracks.length), t);
     p.modifiedAt = DateTime.now().millisecondsSinceEpoch;
     notifyListeners();
     await _rewriteTracks(p);

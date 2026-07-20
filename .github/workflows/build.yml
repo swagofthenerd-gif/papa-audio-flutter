@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Needed for the auto-release step to create GitHub Releases + upload the APK.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -74,3 +77,25 @@ jobs:
           name: papa-audio-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: warn
+
+      # Auto-publish a GitHub Release so older installs get an in-app update
+      # notification. The build number is read from lib/src/version.dart and the
+      # release is tagged v<number>. Idempotent: if the release already exists it
+      # is left untouched. Only runs on a successful build of the target branch.
+      - name: Publish GitHub Release
+        if: success() && github.ref == 'refs/heads/claude/project-changes-review-zgqc3y'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BUILD=$(grep -oP 'kAppBuildNumber\s*=\s*\K[0-9]+' lib/src/version.dart)
+          NAME=$(grep -oP "kAppVersionName\s*=\s*'\K[^']+" lib/src/version.dart)
+          TAG="v${BUILD}"
+          echo "Release tag: $TAG (version $NAME, build $BUILD)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping."
+            exit 0
+          fi
+          cp build/app/outputs/flutter-apk/app-release.apk PapaAudio.apk
+          gh release create "$TAG" PapaAudio.apk \
+            --title "Papa Audio $NAME (build $BUILD)" \
+            --notes "Automated release for build $BUILD."

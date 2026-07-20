@@ -232,3 +232,35 @@ class MosaicArt extends StatelessWidget {
     );
   }
 }
+
+/// Tactile tap-down shrink (Apple/Namida feel): the child scales to ~0.96 while
+/// pressed and springs back on release. Wrap any tappable card/tile with it.
+class PressScale extends StatefulWidget {
+  final Widget child;
+  final double pressed;
+  const PressScale({super.key, required this.child, this.pressed = 0.96});
+  @override
+  State<PressScale> createState() => _PressScaleState();
+}
+
+class _PressScaleState extends State<PressScale> {
+  double _scale = 1;
+  void _set(double v) {
+    if (_scale != v) setState(() => _scale = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) => _set(widget.pressed),
+      onPointerUp: (_) => _set(1),
+      onPointerCancel: (_) => _set(1),
+      child: AnimatedScale(
+        scale: _scale,
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}

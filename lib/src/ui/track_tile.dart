@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
@@ -169,8 +170,12 @@ class TrackTile extends StatelessWidget {
             ),
             onTap: () => sel.active ? sel.toggle(track) : onTap(),
             // Long-press starts (or extends) multi-select, Namida-style; the
-            // context menu stays reachable via the ⋮ button.
-            onLongPress: () => sel.toggle(track),
+            // context menu stays reachable via the ⋮ button. Light haptic tick
+            // to confirm the selection engaged.
+            onLongPress: () {
+              HapticFeedback.selectionClick();
+              sel.toggle(track);
+            },
           );
             },
           );

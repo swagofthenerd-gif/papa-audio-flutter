@@ -55,7 +55,8 @@ class YtItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.read<AppState>();
-    return Material(
+    return PressScale(
+        child: Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(_circular ? size : PA.rMd),
@@ -101,7 +102,7 @@ class YtItemCard extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 
   void _open(BuildContext context, AppState s) {

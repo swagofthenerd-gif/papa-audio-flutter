@@ -10,8 +10,8 @@ feel-per-effort within each section. Verify each on the emulator.
 ---
 
 ## 1. Quick wins — highest feel-per-effort, do first
-- [ ] **[S] Haptics everywhere** — light tick on long-press select, swipe-commit, drag-reorder, tab switch, snap of the player sheet. (PARTIAL: home cards/chips, favorite, swipe-commit, reorder, tab switch, sheet snap done 2026-07-19; long-press select pending.)
-- [ ] **[S] Press-scale on cards** — `AnimatedScale` to ~0.96 on tap-down for shelf/album/track cards (Apple/Namida tactile feel).
+- [x] **[S] Haptics everywhere** — light tick on long-press select, swipe-commit, drag-reorder, tab switch, snap of the player sheet. (home cards/chips, favorite, swipe-commit, reorder, tab switch, sheet snap done 2026-07-19; track-tile long-press select done 2026-07-20.)
+- [x] **[S] Press-scale on cards** — `AnimatedScale` to ~0.96 on tap-down for shelf/album/track cards (shared `PressScale` in widgets.dart; home cards + YT shelf cards 2026-07-20).
 - [x] **[S] Like-button burst** — heart scale-bounce + haptic on favorite toggle (player). TODO: extend to track-tile hearts.
 - [x] **[S] AnimatedIcon play/pause** — player main button + expanded utility row now morph (`AnimatedIcons.play_pause`). TODO: mini-bar bottom strip if it has its own.
 - [ ] **[S] Hero cross-fade** — `Hero` on artwork from card → album/player so it morphs instead of cutting.

@@ -330,7 +330,9 @@ class _TracksViewState extends State<_TracksView>
     _recompute(s);
     final tracks = _tracks;
     final letterIndex = _letterIndex;
-    if (tracks.isEmpty) return const _Empty('No tracks');
+    if (tracks.isEmpty) {
+      return const _Empty('No tracks', icon: Icons.music_note_outlined);
+    }
 
     final alphaSort =
         widget.sort == TrackSort.title || widget.sort == TrackSort.artist;
@@ -496,7 +498,7 @@ class _AlbumsView extends StatelessWidget {
           .where((a) => blobMatches(normText('${a.name} ${a.artist}'), query))
           .toList();
     }
-    if (albums.isEmpty) return const _Empty('No albums');
+    if (albums.isEmpty) return const _Empty('No albums', icon: Icons.album_outlined);
     final columns = context.read<AppState>().settings.gridColumns;
     return GridView.builder(
       padding: const EdgeInsets.all(12),
@@ -836,7 +838,7 @@ class _ArtistsViewState extends State<_ArtistsView> {
       },
     );
     final byArtist = _cache.groups;
-    if (names.isEmpty) return const _Empty('No artists');
+    if (names.isEmpty) return const _Empty('No artists', icon: Icons.person_outline);
     return ListView.builder(
       itemCount: names.length,
       itemBuilder: (_, i) {
@@ -903,7 +905,8 @@ class _GenresViewState extends State<_GenresView> {
     final byGenre = _cache.groups;
     if (names.isEmpty) {
       return const _Empty(
-          'No genres — genre tags need Android 11+ to be indexed');
+          'No genres — genre tags need Android 11+ to be indexed',
+          icon: Icons.category_outlined);
     }
     return ListView.builder(
       itemCount: names.length,
@@ -984,7 +987,7 @@ class _FoldersViewState extends State<_FoldersView> {
     _recompute(widget.lib, widget.query);
     final byFolder = _byFolder;
     final dirs = _dirs;
-    if (dirs.isEmpty) return const _Empty('No folders');
+    if (dirs.isEmpty) return const _Empty('No folders', icon: Icons.folder_outlined);
     return ListView.builder(
       itemCount: dirs.length,
       itemBuilder: (_, i) {
@@ -1311,11 +1314,10 @@ class PlayShuffleRow extends StatelessWidget {
 
 class _Empty extends StatelessWidget {
   final String message;
-  const _Empty(this.message);
+  final IconData icon;
+  const _Empty(this.message, {this.icon = Icons.library_music_outlined});
   @override
-  Widget build(BuildContext context) => Center(
-      child:
-          Text(message, style: const TextStyle(color: PA.textSecondary)));
+  Widget build(BuildContext context) => EmptyState(icon: icon, title: message);
 }
 
 class _PermissionPrompt extends StatelessWidget {

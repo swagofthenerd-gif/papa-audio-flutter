@@ -197,10 +197,10 @@ class PlaylistScreen extends StatelessWidget {
               ),
               Expanded(
                 child: playlist.tracks.isEmpty
-                    ? const Center(
-                        child: Text('No tracks yet — use “Add to playlist” on any track',
-                            style: TextStyle(
-                                color: PA.textSecondary, fontSize: 13)))
+                    ? const EmptyState(
+                        icon: Icons.queue_music_outlined,
+                        title: 'No tracks yet',
+                        hint: 'Use “Add to playlist” on any track to build it up.')
                     : ReorderableListView.builder(
                         padding: const EdgeInsets.only(bottom: 80),
                         itemCount: playlist.tracks.length,

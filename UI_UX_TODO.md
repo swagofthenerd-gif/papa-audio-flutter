@@ -15,7 +15,7 @@ feel-per-effort within each section. Verify each on the emulator.
 - [x] **[S] Like-button burst** — heart scale-bounce + haptic on favorite toggle (player). TODO: extend to track-tile hearts.
 - [x] **[S] AnimatedIcon play/pause** — player main button + expanded utility row now morph (`AnimatedIcons.play_pause`). TODO: mini-bar bottom strip if it has its own.
 - [ ] **[S] Hero cross-fade** — `Hero` on artwork from card → album/player so it morphs instead of cutting.
-- [ ] **[S] Empty-state polish** — icon + title + hint + action button on Search idle, empty library, empty playlist (several are bare text).
+- [x] **[S] Empty-state polish** — shared `EmptyState` (icon + title + hint + optional action) in widgets.dart; applied to library tabs (tracks/albums/artists/folders/genres), empty playlist, YT library. Search idle already shows the Explore feed; search no-results already iconified. (2026-07-20)
 - [ ] **[S] Undo snackbars** on every destructive action — playlist track remove already lacks one; audit delete/remove flows.
 - [x] **[S] Bouncy scroll physics** — app-wide `BouncingScrollPhysics` + stretch overscroll via `MaterialApp.scrollBehavior`.
 

@@ -233,6 +233,62 @@ class MosaicArt extends StatelessWidget {
   }
 }
 
+/// A polished empty/idle placeholder: centered icon, title, optional hint line,
+/// and an optional call-to-action button. Replaces bare "No tracks" text so
+/// empty surfaces read intentionally rather than looking broken.
+class EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String? hint;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.hint,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: PA.textMuted, size: 46),
+            const SizedBox(height: 14),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.w700)),
+            if (hint != null) ...[
+              const SizedBox(height: 6),
+              Text(hint!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: PA.textSecondary, fontSize: 13)),
+            ],
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 18),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: PA.accent,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12)),
+                onPressed: onAction,
+                child: Text(actionLabel!),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Tactile tap-down shrink (Apple/Namida feel): the child scales to ~0.96 while
 /// pressed and springs back on release. Wrap any tappable card/tile with it.
 class PressScale extends StatefulWidget {

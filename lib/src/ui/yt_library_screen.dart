@@ -139,9 +139,10 @@ class _LibrarySurfaceState extends State<_LibrarySurface>
     // Flatten every shelf's items into one scroll grid of cards.
     final items = [for (final s in _shelves) ...s.items];
     if (items.isEmpty) {
-      return const Center(
-          child: Text('Nothing here yet',
-              style: TextStyle(color: PA.textSecondary)));
+      return const EmptyState(
+          icon: Icons.subscriptions_outlined,
+          title: 'Nothing here yet',
+          hint: 'Your YouTube library will show up here once it syncs.');
     }
     return RefreshIndicator(
       color: PA.accent,

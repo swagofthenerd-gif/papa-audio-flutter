@@ -18,6 +18,7 @@ class TrackArt extends StatelessWidget {
   final double size;
   final double radius;
   final int px; // requested pixel width for network/MediaStore art
+  final String? heroTag; // when set, wraps the art in a Hero widget
 
   const TrackArt({
     super.key,
@@ -26,14 +27,19 @@ class TrackArt extends StatelessWidget {
     required this.size,
     this.radius = 4,
     int? px,
+    this.heroTag,
   }) : px = px ?? 300;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
+    final child = ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox(width: size, height: size, child: _image(context)),
     );
+    if (heroTag != null) {
+      return Hero(tag: heroTag!, child: child);
+    }
+    return child;
   }
 
   Widget _image(BuildContext context) {

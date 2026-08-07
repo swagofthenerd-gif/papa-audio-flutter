@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../models.dart';
 import '../theme.dart';
+import 'shimmer.dart';
 import 'widgets.dart';
 
 enum _Source { soulseek, youtube }
@@ -107,9 +108,35 @@ class _SearchTabState extends State<SearchTab> {
                 style: const TextStyle(color: PA.textSecondary, fontSize: 12)),
           ),
         Expanded(
-          child: _source == _Source.soulseek
-              ? _SlskResults(results: _slskResults)
-              : _YtResults(results: _ytResults),
+          child: _busy
+              ? const ShimmerGrid()
+              : _source == _Source.soulseek
+                  ? _slskResults.isEmpty && _ctrl.text.trim().isNotEmpty
+                      ? Center(
+                          child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.search_off,
+                                    color: PA.textMuted, size: 48),
+                                const SizedBox(height: 12),
+                                Text('No results for "${_ctrl.text.trim()}"',
+                                    style: const TextStyle(
+                                        color: PA.textSecondary)),
+                              ]))
+                      : _SlskResults(results: _slskResults)
+                  : _ytResults.isEmpty && _ctrl.text.trim().isNotEmpty
+                      ? Center(
+                          child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.search_off,
+                                    color: PA.textMuted, size: 48),
+                                const SizedBox(height: 12),
+                                Text('No results for "${_ctrl.text.trim()}"',
+                                    style: const TextStyle(
+                                        color: PA.textSecondary)),
+                              ]))
+                      : _YtResults(results: _ytResults),
         ),
       ],
     );

@@ -13,6 +13,8 @@ import 'library_tab.dart';
 import 'playlists_ui.dart';
 import 'recently_added.dart';
 import 'settings_screen.dart';
+import 'route_transitions.dart';
+import 'shimmer.dart';
 import 'widgets.dart';
 
 /// Namida-style landing page: a quick-picks grid over a stack of horizontal
@@ -95,7 +97,7 @@ class _HomeTabState extends State<HomeTab> {
                   title: 'Recently added',
                   onSeeAll: () => Navigator.push(
                       context,
-                      MaterialPageRoute(
+                      PapaPageRoute(
                           builder: (_) => const RecentlyAddedScreen())),
                   child: _LocalAlbumRow(albums: recentlyAdded),
                 ),
@@ -119,8 +121,12 @@ class _HomeTabState extends State<HomeTab> {
                   title: 'Recent queues',
                   child: _QueueRow(queues: s.queues.saved),
                 ),
+              // Bridge is loading — show shimmer skeletons.
+              if (s.loading)
+                SliverToBoxAdapter(child: _LoadingShelves()),
               // Nothing indexed yet and no bridge — guide the user.
-              if (recent.isEmpty &&
+              if (!s.loading &&
+                  recent.isEmpty &&
                   localAlbums.isEmpty &&
                   s.albums.isEmpty)
                 SliverToBoxAdapter(child: _EmptyHome(state: s)),
@@ -143,7 +149,7 @@ class _HomeTabState extends State<HomeTab> {
 
   static void _openTracks(BuildContext context, String title, List<Track> t) {
     Navigator.push(context,
-        MaterialPageRoute(builder: (_) => TrackListScreen(title: title, tracks: t)));
+        PapaPageRoute(builder: (_) => TrackListScreen(title: title, tracks: t)));
   }
 }
 
@@ -176,7 +182,7 @@ class _Header extends StatelessWidget {
             tooltip: 'Listening history',
             onPressed: () => Navigator.push(
                 context,
-                MaterialPageRoute(
+                PapaPageRoute(
                     builder: (_) => Scaffold(
                           appBar: AppBar(
                               backgroundColor: PA.background,
@@ -189,7 +195,7 @@ class _Header extends StatelessWidget {
             icon: const Icon(Icons.settings_outlined, color: PA.textSecondary),
             tooltip: 'Settings',
             onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                PapaPageRoute(builder: (_) => const SettingsScreen())),
           ),
         ],
       ),
@@ -220,7 +226,7 @@ class _QuickPicks extends StatelessWidget {
           const [Color(0xFF7A3FA0), Color(0xFF3A1E52)],
           () => Navigator.push(
               context,
-              MaterialPageRoute(
+              PapaPageRoute(
                   builder: (_) => const RecentlyAddedScreen()))),
     ];
 
@@ -240,7 +246,7 @@ class _QuickPicks extends StatelessWidget {
 
   void _open(BuildContext context, String title, List<Track> tracks) {
     Navigator.push(context,
-        MaterialPageRoute(builder: (_) => TrackListScreen(title: title, tracks: tracks)));
+        PapaPageRoute(builder: (_) => TrackListScreen(title: title, tracks: tracks)));
   }
 }
 
@@ -337,12 +343,14 @@ class _Card extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final String? heroTag;
   const _Card({
     this.artUri,
     this.artPath,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.heroTag,
   });
 
   @override
@@ -357,7 +365,13 @@ class _Card extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: TrackArt(
-                  artUri: artUri, artPath: artPath, size: 138, radius: 8, px: 300),
+                  artUri: artUri,
+                  artPath: artPath,
+                  size: 138,
+                  radius: 8,
+                  px: 300,
+                  heroTag: heroTag,
+              ),
             ),
             const SizedBox(height: 6),
             Text(title,
@@ -422,8 +436,9 @@ class _LocalAlbumRow extends StatelessWidget {
           artUri: 'localart://${a.artTrackId}/${a.albumId}',
           title: a.name,
           subtitle: a.artist,
+          heroTag: 'localalbum-${a.albumId}',
           onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => LocalAlbumScreen(album: a))),
+              PapaPageRoute(builder: (_) => LocalAlbumScreen(album: a))),
         ),
     ]);
   }
@@ -440,8 +455,9 @@ class _PcAlbumRow extends StatelessWidget {
           artPath: a.artPath,
           title: a.name,
           subtitle: a.artist,
+          heroTag: 'album-${a.id}',
           onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => AlbumScreen(album: a))),
+              PapaPageRoute(builder: (_) => AlbumScreen(album: a))),
         ),
     ]);
   }
@@ -460,7 +476,7 @@ class _PlaylistRow extends StatelessWidget {
           title: p.name,
           subtitle: '${p.tracks.length} tracks',
           onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => PlaylistScreen(playlist: p))),
+              PapaPageRoute(builder: (_) => PlaylistScreen(playlist: p))),
         ),
     ]);
   }
@@ -486,6 +502,24 @@ class _QueueRow extends StatelessWidget {
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────
+
+class _LoadingShelves extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < 3; i++) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+            child: const ShimmerBox(width: 140, height: 18),
+          ),
+          const ShimmerRow(),
+        ],
+      ],
+    );
+  }
+}
 
 class _EmptyHome extends StatelessWidget {
   final AppState state;

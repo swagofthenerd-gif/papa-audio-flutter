@@ -14,6 +14,7 @@ import 'src/ui/player_sheet.dart';
 import 'src/ui/search_tab.dart';
 import 'src/ui/selection_bar.dart';
 import 'src/ui/track_tile.dart';
+import 'src/ui/route_transitions.dart';
 import 'src/ui/widgets.dart';
 
 Future<void> main() async {
@@ -226,23 +227,26 @@ class AlbumCard extends StatelessWidget {
         context.read<AppState>().bridge.artUrl(album.artPath, width: 300);
     return GestureDetector(
       onTap: () => Navigator.push(context,
-          MaterialPageRoute(builder: (_) => AlbumScreen(album: album))),
+          PapaPageRoute(builder: (_) => AlbumScreen(album: album))),
       onLongPress: () => showCollectionMenu(context,
           title: album.name, tracks: album.tracks),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: art != null
-                  ? CachedNetworkImage(
-                      imageUrl: art,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      placeholder: (_, _) => Container(color: PA.card),
-                      errorWidget: (_, _, _) => const ArtPlaceholder())
-                  : const ArtPlaceholder(),
+            child: Hero(
+              tag: 'album-${album.id}',
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: art != null
+                    ? CachedNetworkImage(
+                        imageUrl: art,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        placeholder: (_, _) => Container(color: PA.card),
+                        errorWidget: (_, _, _) => const ArtPlaceholder())
+                    : const ArtPlaceholder(),
+              ),
             ),
           ),
           const SizedBox(height: 6),
@@ -278,9 +282,12 @@ class AlbumScreen extends StatelessWidget {
             pinned: true,
             backgroundColor: PA.background,
             flexibleSpace: FlexibleSpaceBar(
-              background: art != null
-                  ? CachedNetworkImage(imageUrl: art, fit: BoxFit.cover)
-                  : const ArtPlaceholder(),
+              background: Hero(
+                tag: 'album-${album.id}',
+                child: art != null
+                    ? CachedNetworkImage(imageUrl: art, fit: BoxFit.cover)
+                    : const ArtPlaceholder(),
+              ),
             ),
           ),
           SliverToBoxAdapter(

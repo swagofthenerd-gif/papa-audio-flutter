@@ -1,5 +1,38 @@
 import 'package:flutter/material.dart';
 
+/// Systematic text styles matching Spotify's hierarchy.
+/// Every screen should reference these instead of defining inline styles.
+class PapaText {
+  PapaText._();
+
+  // Display — for greeting headers
+  static const display = TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: PA.text, letterSpacing: -0.3);
+  
+  // Headline — section titles ("Recently played", "Your top tracks")
+  static const headline = TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: PA.text, letterSpacing: -0.2);
+  
+  // Title — album names, track titles in lists
+  static const title = TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: PA.text, letterSpacing: -0.1);
+  
+  // Subtitle — artist names, album info
+  static const subtitle = TextStyle(fontSize: 13, color: PA.textSecondary, letterSpacing: -0.05);
+  
+  // Body — normal text
+  static const body = TextStyle(fontSize: 14, color: PA.text, height: 1.4);
+  
+  // Caption — metadata, durations, track counts
+  static const caption = TextStyle(fontSize: 11, color: PA.textMuted, letterSpacing: 0.2);
+  
+  // Overline — "NOW PLAYING", section labels
+  static const overline = TextStyle(fontSize: 11, color: PA.textSecondary, letterSpacing: 1.5, fontWeight: FontWeight.w600);
+  
+  // Button label
+  static const button = TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.1);
+  
+  // Large title (for album detail screen)
+  static const largeTitle = TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: PA.text);
+}
+
 /// Papa Audio palette — carried over 1:1 from the React Native app so the new
 /// Flutter build looks identical.
 class PA {
@@ -18,22 +51,40 @@ class PA {
 }
 
 ThemeData papaTheme() {
-  final base = ThemeData.dark(useMaterial3: true);
-  return base.copyWith(
+  return ThemeData(
+    brightness: Brightness.dark,
     scaffoldBackgroundColor: PA.background,
-    colorScheme: base.colorScheme.copyWith(
-      primary: PA.accent,
-      secondary: PA.accent,
-      surface: PA.surface,
-      error: PA.error,
+    colorSchemeSeed: PA.accent,
+    useMaterial3: true,
+    fontFamily: 'Roboto',
+    appBarTheme: const AppBarTheme(
+      backgroundColor: PA.background,
+      elevation: 0,
+      scrolledUnderElevation: 0,
     ),
-    textTheme: base.textTheme.apply(
-      bodyColor: PA.text,
-      displayColor: PA.text,
-      fontFamily: 'Roboto',
+    textTheme: const TextTheme(
+      headlineLarge: PapaText.display,
+      headlineMedium: PapaText.headline,
+      titleLarge: PapaText.title,
+      titleMedium: PapaText.subtitle,
+      bodyLarge: PapaText.body,
+      bodySmall: PapaText.caption,
+      labelSmall: PapaText.overline,
+      labelLarge: PapaText.button,
     ),
-    iconTheme: const IconThemeData(color: PA.textSecondary),
-    splashColor: PA.accent.withValues(alpha: 0.12),
-    highlightColor: PA.accent.withValues(alpha: 0.08),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: PA.surface,
+      indicatorColor: PA.accent.withValues(alpha: 0.2),
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: PA.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: PA.surfaceElevated,
+      contentTextStyle: const TextStyle(color: PA.text),
+      actionTextColor: PA.accent,
+      behavior: SnackBarBehavior.floating,
+    ),
   );
 }

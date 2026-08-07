@@ -152,19 +152,16 @@ class _PlayerSheetState extends State<PlayerSheet>
               final top = collapsedTop * (1 - t);
               // Collapsed, the sheet is ONLY the mini strip (the nav bar stays
               // visible and tappable below it); expanded it fills the screen.
-              final bottom = widget.navHeight * (1 - t);
-              final miniOpacity = (1 - t * 2.2).clamp(0.0, 1.0);
-              final fullOpacity = ((t - 0.55) / 0.45).clamp(0.0, 1.0);
+              final miniOpacity = (1 - t).clamp(0.0, 1.0);
+              final fullOpacity = t.clamp(0.0, 1.0);
               final artRect =
                   Rect.lerp(miniRect, fullRect, Curves.easeInOut.transform(t))!;
               return Stack(
                 children: [
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    top: top,
-                    bottom: bottom,
-                    child: GestureDetector(
+                  Positioned.fill(
+                    child: Transform.translate(
+                      offset: Offset(0, top),
+                      child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: t < 0.1 ? () => _c.fling(velocity: 2.2) : null,
                       onVerticalDragUpdate: (d) => _onVDragUpdate(d, travel),
@@ -221,17 +218,22 @@ class _PlayerSheetState extends State<PlayerSheet>
                                 builder: (_, lyr, child) => Opacity(
                                     opacity: lyr && t > 0.5 ? 0 : 1,
                                     child: child),
-                                child: ClipRRect(
-                                  borderRadius:
-                                      BorderRadius.circular(4 + 6 * t),
-                                  child: FittedBox(
-                                      fit: BoxFit.fill, child: art),
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 300),
+                                  child: ClipRRect(
+                                    key: ValueKey(track.key),
+                                    borderRadius:
+                                        BorderRadius.circular(4 + 6 * t),
+                                    child: FittedBox(
+                                        fit: BoxFit.fill, child: art),
+                                  ),
                                 ),
                               ),
                             ),
                           ],
                         ),
                       ),
+                    ),
                     ),
                   ),
                 ],
@@ -613,8 +615,15 @@ class _FavButton extends StatelessWidget {
       builder: (_, _) {
         final fav = pl.isFavorite(track);
         return IconButton(
-          icon: Icon(fav ? Icons.favorite : Icons.favorite_border,
-              size: size, color: fav ? PA.accent : PA.textSecondary),
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: Icon(
+              key: ValueKey(fav),
+              fav ? Icons.favorite : Icons.favorite_border,
+              size: size,
+              color: fav ? PA.accent : PA.textSecondary,
+            ),
+          ),
           onPressed: () => pl.toggleFavorite(track),
         );
       },

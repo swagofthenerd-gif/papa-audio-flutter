@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../models.dart';
 import '../theme.dart';
+import 'shimmer.dart';
 import 'widgets.dart';
 
 /// Two lists: tracks downloaded onto this phone (playable offline) and the
@@ -87,6 +88,12 @@ class _DownloadsTabState extends State<DownloadsTab> {
         // notifies never rebuild hundreds of tiles. (Perf audit finding.)
         final inFlight = dm.progress.entries.toList();
         final transfers = _transfers.whereType<Map>().toList();
+
+        // Show shimmer while downloads are initializing.
+        if (dm.busy && dm.downloaded.isEmpty) {
+          return const ShimmerTab(shelves: 2);
+        }
+
         final items = <Object>[
           const _SectionHeader('On this phone'),
           if (dm.downloaded.isEmpty && inFlight.isEmpty) const _EmptyNote(

@@ -2,9 +2,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-
-import '../../src/app_state.dart';
 import '../../src/models.dart';
 import '../../services/tag_editor_service.dart';
 import '../../src/theme.dart';

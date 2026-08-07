@@ -149,6 +149,7 @@ class PlaylistScreen extends StatelessWidget {
                       final name = await promptText(
                           context, 'Rename playlist', playlist.name);
                       if (name != null) await s.playlists.rename(playlist, name);
+                      break;
                     case 'dedupe':
                       final n = await s.playlists.removeDuplicates(playlist);
                       if (context.mounted) {
@@ -158,9 +159,11 @@ class PlaylistScreen extends StatelessWidget {
                                 : 'Removed $n duplicate${n == 1 ? '' : 's'}'),
                             duration: const Duration(milliseconds: 1400)));
                       }
+                      break;
                     case 'delete':
                       await s.playlists.delete(playlist);
                       if (context.mounted) Navigator.pop(context);
+                      break;
                   }
                 },
                 itemBuilder: (_) => const [
@@ -190,7 +193,7 @@ class PlaylistScreen extends StatelessWidget {
                     : ReorderableListView.builder(
                         padding: const EdgeInsets.only(bottom: 80),
                         itemCount: playlist.tracks.length,
-                        onReorderItem: (from, to) =>
+                        onReorder: (from, to) =>
                             s.playlists.reorder(playlist, from, to),
                         itemBuilder: (_, i) {
                           final t = playlist.tracks[i];

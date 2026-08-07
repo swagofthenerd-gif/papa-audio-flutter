@@ -35,6 +35,7 @@ class PapaText {
 
 /// Papa Audio palette — carried over 1:1 from the React Native app so the new
 /// Flutter build looks identical.
+/// Short alias used throughout the app.
 class PA {
   static const background = Color(0xFF121212);
   static const surface = Color(0xFF181818);
@@ -88,3 +89,6 @@ ThemeData papaTheme() {
     ),
   );
 }
+
+/// Legacy alias — some files reference `PapaColors` instead of `PA`.
+typedef PapaColors = PA;

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../settings.dart';
 import '../local_library.dart';
-import 'theme.dart';
+import '../theme.dart';
 
 /// First-run onboarding screen — configure critical settings before entering the app.
 class OnboardingPage extends StatefulWidget {
@@ -49,7 +49,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
               const Spacer(flex: 2),
               Icon(Icons.music_note_rounded, size: 80, color: PapaColors.accent),
               const SizedBox(height: 16),
-              PapaText('Welcome to Papa Audio', style: PapaTextStyle.headline),
+              Text('Welcome to Papa Audio', style: PapaText.largeTitle),
               const SizedBox(height: 8),
               const Text('Let\'s set up your music experience.',
                 textAlign: TextAlign.center,

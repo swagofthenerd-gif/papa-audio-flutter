@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'theme.dart';
+import '../theme.dart';
 
 /// About Papa Audio page — version info, credits, changelog, license.
 class AboutPage extends StatefulWidget {
@@ -69,7 +70,7 @@ class _AboutPageState extends State<AboutPage> with TickerProviderStateMixin {
                 ),
               ),
               const SizedBox(height: 12),
-              PapaText('Papa Audio', style: PapaTextStyle.headline),
+              Text('Papa Audio', style: PapaText.largeTitle),
               const SizedBox(height: 4),
               Text(_version, style: TextStyle(color: isDark ? Colors.white54 : Colors.black54)),
               const SizedBox(height: 8),

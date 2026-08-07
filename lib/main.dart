@@ -1,9 +1,11 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import 'src/app_state.dart';
+import 'src/crash_logger.dart';
 import 'src/models.dart';
 import 'src/theme.dart';
 import 'src/ui/collection_menu.dart';
@@ -19,6 +21,12 @@ import 'src/ui/widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Crash logger — writes every error to disk for later inspection ────
+  await CrashLogger.init();
+  FlutterError.onError = CrashLogger.onFlutterError;
+  PlatformDispatcher.instance.onError = CrashLogger.onPlatformError;
+
   // Never block first paint on init/network — that caused a white screen on
   // launch whenever a (now unreachable) bridge URL was already saved.
   try {

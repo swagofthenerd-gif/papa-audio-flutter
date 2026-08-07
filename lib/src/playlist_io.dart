@@ -10,7 +10,7 @@ import 'playlists.dart';
 
 /// Import/export playlists in M3U, PLS, and JSON formats.
 class PlaylistImportExportService {
-  final PlaylistService _playlists;
+  final PlaylistsService _playlists;
 
   PlaylistImportExportService(this._playlists);
 
@@ -23,7 +23,7 @@ class PlaylistImportExportService {
     buf.writeln('#PLAYLIST:$playlistName');
     for (final track in tracks) {
       buf.writeln('#EXTINF:${track.duration},${track.artist} - ${track.title}');
-      buf.writeln(track.path);
+      buf.writeln(track.filePath);
     }
     return buf.toString();
   }
@@ -35,7 +35,7 @@ class PlaylistImportExportService {
     buf.writeln('NumberOfEntries=${tracks.length}');
     for (var i = 0; i < tracks.length; i++) {
       final n = i + 1;
-      buf.writeln('File$n=${tracks[i].path}');
+      buf.writeln('File$n=${tracks[i].filePath}');
       buf.writeln('Title$n=${tracks[i].artist} - ${tracks[i].title}');
       buf.writeln('Length$n=${tracks[i].duration}');
     }
@@ -114,6 +114,17 @@ class PlaylistImportExportService {
 
   // ── Import ─────────────────────────────────────────────────────
 
+  Track _buildTrack(String filePath, {String? title, String? artist, int duration = 0}) {
+    final id = filePath;
+    return Track(
+      id: id,
+      title: title ?? filePath.split('/').last,
+      artist: artist ?? '',
+      filePath: filePath,
+      duration: duration.toDouble(),
+    );
+  }
+
   /// Import a playlist from an M3U file.
   Future<int> importFromM3U(String filePath, String playlistName) async {
     final file = File(filePath);
@@ -144,16 +155,12 @@ class PlaylistImportExportService {
           title = titlePart.trim();
         }
       }
-      tracks.add(Track(
-        path: line,
-        title: title ?? line.split('/').last,
-        artist: artist ?? '',
-        duration: duration,
-      ));
+      tracks.add(_buildTrack(line, title: title, artist: artist, duration: duration));
     }
 
     if (tracks.isEmpty) return 0;
-    _playlists.createPlaylist(playlistName, tracks);
+    final pl = await _playlists.create(playlistName);
+    await _playlists.addTracks(pl, tracks);
     return tracks.length;
   }
 
@@ -169,7 +176,8 @@ class PlaylistImportExportService {
               .toList() ??
           [];
       if (trackList.isEmpty) return 0;
-      _playlists.createPlaylist(name, trackList);
+      final pl = await _playlists.create(name);
+      await _playlists.addTracks(pl, trackList);
       return trackList.length;
     } catch (_) {
       return 0;
@@ -211,8 +219,8 @@ class PlaylistImportExportService {
       final path = entry.value;
       final titleStr = titleMap[entry.key] ?? '';
       final parts = titleStr.split(' - ');
-      tracks.add(Track(
-        path: path,
+      tracks.add(_buildTrack(
+        path,
         title: parts.length >= 2
             ? parts.sublist(1).join(' - ').trim()
             : titleStr,
@@ -222,7 +230,8 @@ class PlaylistImportExportService {
     }
 
     if (tracks.isEmpty) return 0;
-    _playlists.createPlaylist(playlistName, tracks);
+    final pl = await _playlists.create(playlistName);
+    await _playlists.addTracks(pl, tracks);
     return tracks.length;
   }
 }

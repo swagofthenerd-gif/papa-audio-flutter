@@ -12,12 +12,14 @@ import 'package:sqflite/sqflite.dart';
 /// grows. sqflite runs its work on a platform thread, off the UI isolate.
 class AppDatabase {
   final Database db;
-  AppDatabase._(this.db);
+  final String dbPath;
+  AppDatabase._(this.db, this.dbPath);
 
   static Future<AppDatabase> open() async {
     final dir = await getDatabasesPath();
+    final path = '$dir${Platform.pathSeparator}papa_audio.db';
     final db = await openDatabase(
-      '$dir${Platform.pathSeparator}papa_audio.db',
+      path,
       version: 3,
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createLyricsTable(db);
@@ -59,7 +61,7 @@ class AppDatabase {
         await _createV3Tables(db);
       },
     );
-    final wrapper = AppDatabase._(db);
+    final wrapper = AppDatabase._(db, path);
     await wrapper._importLegacyJson();
     return wrapper;
   }

@@ -386,7 +386,7 @@ class YouTubeService {
 
   /// Get channel videos.
   Future<List<YouTubeVideo>> getChannelVideos(String channelId) =>
-      client.getChannelVideos(videoId: channelId);
+      client.getChannelVideos(channelId);
 
   void dispose() => client.dispose();
 }

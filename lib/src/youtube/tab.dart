@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../app_state.dart';
 import '../bridge.dart';
 import '../models.dart';
 import 'client.dart';
 import 'download_service.dart';
-import 'models.dart';
+import 'models.dart' as yt_models;
 
 /// YouTube tab — search, browse, stream, and download.
 class YouTubeTab extends StatefulWidget {
@@ -61,43 +62,43 @@ class _YouTubeTabState extends State<YouTubeTab>
   }
 
   void _playNow(YouTubeVideo video) {
-    final bridge = context.read<Bridge>();
-    bridge.getYoutubeStreamUrl(video.videoId).then((url) {
-      if (url != null) {
-        final track = Track(
-          path: url,
-          title: video.title,
-          artist: video.author,
-          album: 'YouTube',
-          source: 'youtube',
-          remoteUrl: url,
-        );
-        context.read<PlayerService>().playTrack(track);
-      }
-    });
+    final s = context.read<AppState>();
+    final url = s.bridge.ytStreamUrl(video.videoId);
+    final track = Track(
+      id: 'yt:${video.videoId}',
+      title: video.title,
+      artist: video.author,
+      album: 'YouTube',
+      filePath: 'yt:${video.videoId}',
+      sourceUri: url,
+    );
+    s.playerService.playTrack(track);
   }
 
   void _download(YouTubeVideo video) {
-    final bridge = context.read<Bridge>();
+    final bridge = context.read<AppState>().bridge;
     // Route to PC bridge download if connected
-    if (bridge.isConnected) {
-      bridge.youtubeDownload(video.videoId, video.title);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Downloading "${video.title}" to PC...')),
-      );
+    if (bridge.configured) {
+      bridge.ytDownload(video.videoId, video.title);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloading "${video.title}" to PC...')),
+        );
+      }
     } else {
       // Download to device
       _downloadSvc.download(video.videoId, video.title).listen(
         (progress) {
-          if (progress >= 1.0) {
+          if (progress >= 1.0 && mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Downloaded "${video.title}"')),
             );
           }
         },
         onError: (e) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Download failed: $e')),
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Download failed: $e')),
           );
         },
       );

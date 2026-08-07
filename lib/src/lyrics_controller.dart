@@ -4,9 +4,9 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 
 import 'models.dart';
-import 'db.dart';
 
 /// Lyrics controller — LRC synced + plain text from multiple sources.
 ///
@@ -23,6 +23,10 @@ class LyricsController {
   final Map<String, _CachedLyrics> _cache = {};
   bool _prioritizeEmbedded = true;
   bool _stretchEnabled = true;
+  Database? _db;
+
+  /// Attach database instance (called during app startup).
+  void attachDatabase(Database db) => _db = db;
 
   // ---- public API ----
 
@@ -72,7 +76,7 @@ class LyricsController {
     } catch (_) {}
     // 3) DB cache
     try {
-      final rows = await AppDb.inst.db.query('lyrics', where: 'track_key = ?', whereArgs: [key], limit: 1);
+      final rows = await _db?.query('lyrics', where: 'track_key = ?', whereArgs: [key], limit: 1);
       if (rows.isNotEmpty) {
         return _cacheAndReturn(key, LyricsResult.fromJson(jsonDecode(rows.first['data'] as String)));
       }
@@ -132,11 +136,11 @@ class LyricsController {
 
   Future<void> _saveToDb(String key, String text) async {
     try {
-      await AppDb.inst.db.insert('lyrics', {
+      await _db?.insert('lyrics', {
         'track_key': key,
         'data': jsonEncode({'synced': text.contains('[') && text.contains(']'), 'text': text}),
         'cached_at': DateTime.now().toIso8601String(),
-      }, conflictAlgorithm: 'replace');
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     } catch (_) {}
   }
 

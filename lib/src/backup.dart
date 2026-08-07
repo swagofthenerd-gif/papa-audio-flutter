@@ -15,6 +15,9 @@ class BackupController {
   String? get defaultLocation => _defaultLocation;
   int _autoIntervalDays = 2;
   int get autoIntervalDays => _autoIntervalDays;
+  AppDatabase? _db;
+
+  void attachDatabase(AppDatabase db) => _db = db;
 
   Future<void> init() async {
     final dir = await getApplicationDocumentsDirectory();
@@ -36,7 +39,8 @@ class BackupController {
     await Directory(dest).create(recursive: true);
 
     // Copy DB
-    final dbPath = AppDb.inst.dbPath;
+    if (_db == null) return null;
+    final dbPath = _db!.dbPath;
     if (await File(dbPath).exists()) {
       await File(dbPath).copy('$dest/db.sqlite');
     }
@@ -69,7 +73,8 @@ class BackupController {
       // Restore DB
       final dbFile = File('${srcDir.path}/db.sqlite');
       if (await dbFile.exists()) {
-        await dbFile.copy(AppDb.inst.dbPath);
+        if (_db == null) return false;
+    await dbFile.copy(_db!.dbPath);
       }
 
       // Restore settings

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'client.dart';
 import 'models.dart';
 
 /// Downloads YouTube audio to the device.

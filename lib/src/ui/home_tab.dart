@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../main.dart' show AlbumScreen; // PC album detail screen
+import '../../ui/widgets/mixes_section.dart';
 import '../app_state.dart';
 import '../local_library.dart';
 import '../models.dart';
@@ -69,6 +70,7 @@ class _HomeTabState extends State<HomeTab> {
             slivers: [
               SliverToBoxAdapter(child: _Header()),
               SliverToBoxAdapter(child: _QuickPicks(state: s)),
+              const SliverToBoxAdapter(child: MixesSection()),
               if (recent.isNotEmpty)
                 _Shelf(
                   title: 'Recently played',

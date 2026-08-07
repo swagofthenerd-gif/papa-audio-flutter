@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../models.dart';
 import '../player_service.dart';
 import '../theme.dart';
+import '../../ui/screens/tag_editor_screen.dart';
 import 'music_hub.dart';
 import 'widgets.dart';
 
@@ -94,6 +95,19 @@ void showTrackMenu(BuildContext context, Track t) {
                 onTap: () {
                   s.downloads.download(t, s.bridge);
                   Navigator.pop(sheetCtx);
+                },
+              ),
+            if (t.filePath.isNotEmpty || (t.sourceUri != null && t.sourceUri!.startsWith('file://')))
+              _MenuItem(
+                icon: Icons.edit_outlined,
+                label: 'Edit tags',
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => TagEditorScreen(track: t)),
+                  );
                 },
               ),
             _MenuItem(

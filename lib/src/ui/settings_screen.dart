@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../settings.dart';
 import '../theme.dart';
+import '../../ui/widgets/backup_section.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
 import 'stats_screen.dart';
@@ -329,6 +330,8 @@ class SettingsScreen extends StatelessWidget {
               value: st.swipeLeft,
               onChanged: (a) => st.update(() => st.swipeLeft = a),
             ),
+            const _Section('Data'),
+            const BackupSection(),
             const _Section('PC bridge'),
             ListTile(
               leading: const Icon(Icons.computer, color: PA.textSecondary),

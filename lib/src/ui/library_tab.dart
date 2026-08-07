@@ -9,6 +9,10 @@ import '../models.dart';
 import '../player_service.dart';
 import '../text_norm.dart';
 import '../theme.dart';
+import '../../services/sort_service.dart';
+import '../../ui/screens/folder_browser_screen.dart';
+import '../../ui/widgets/sort_chip_bar.dart';
+import '../../ui/widgets/search_filter_sheet.dart';
 import 'collection_menu.dart';
 import 'playlists_ui.dart';
 import 'selection_bar.dart';
@@ -37,6 +41,7 @@ class _LibraryTabState extends State<LibraryTab>
   String _query = '';
   TrackSort _sort = TrackSort.title;
   bool _sortReverse = false;
+  SortType _chipSort = SortType.title;
   Timer? _debounce;
 
   @override
@@ -136,6 +141,30 @@ class _LibraryTabState extends State<LibraryTab>
                   const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               tabs: [for (final t in _tabs) Tab(text: t, height: 40)],
             ),
+            // Browse Folders quick-access card
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Card(
+                color: PA.card,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                child: ListTile(
+                  leading: const Icon(Icons.folder_open, color: PA.warning),
+                  title: const Text('Browse Folders',
+                      style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                      'Explore your device storage for music files',
+                      style: TextStyle(color: PA.textMuted, fontSize: 11)),
+                  trailing:
+                      const Icon(Icons.chevron_right, color: PA.textMuted),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const FolderBrowserScreen()),
+                  ),
+                ),
+              ),
+            ),
             Expanded(
               child: TabBarView(
                 controller: _tc,
@@ -144,7 +173,15 @@ class _LibraryTabState extends State<LibraryTab>
                       lib: lib,
                       query: _query,
                       sort: _sort,
-                      reverse: _sortReverse),
+                      reverse: _sortReverse,
+                      chipSort: _chipSort,
+                      onChipSortChanged: (st) => setState(() {
+                        _chipSort = st;
+                        _sort = _trackSortFromChip(st);
+                      }),
+                      onOpenFilterSheet: () =>
+                          _openFilterSheet(lib, context),
+                    ),
                   _AlbumsView(lib: lib, query: _query),
                   _ArtistsView(lib: lib, query: _query),
                   _GenresView(lib: lib, query: _query),
@@ -161,6 +198,36 @@ class _LibraryTabState extends State<LibraryTab>
       },
     );
   }
+
+  void _openFilterSheet(LocalLibrary lib, BuildContext context) {
+    final allTracks = lib.albums.expand((a) => a.tracks).toList();
+    showModalBottomSheet<Track>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: PA.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SearchFilterSheet(tracks: allTracks),
+    ).then((track) {
+      if (track != null && context.mounted) {
+        final s = context.read<AppState>();
+        final all = lib.albums.expand((a) => a.tracks).toList();
+        final idx = all.indexWhere((t) => t.key == track.key);
+        if (idx >= 0) s.playTrackInList(all, idx);
+      }
+    });
+  }
+
+  TrackSort _trackSortFromChip(SortType st) => switch (st) {
+        SortType.title => TrackSort.title,
+        SortType.artist => TrackSort.artist,
+        SortType.album => TrackSort.album,
+        SortType.duration => TrackSort.duration,
+        SortType.dateAdded => TrackSort.dateAdded,
+        SortType.year => TrackSort.year,
+        SortType.playCount => TrackSort.mostPlayed,
+        SortType.random => _sort, // keep existing sort, random is handled differently
+      };
 
   List<Track> _filteredTracks(LocalLibrary lib) {
     final all = lib.albums.expand((a) => a.tracks).toList();
@@ -236,11 +303,17 @@ class _TracksView extends StatefulWidget {
   final String query;
   final TrackSort sort;
   final bool reverse;
+  final SortType chipSort;
+  final ValueChanged<SortType> onChipSortChanged;
+  final VoidCallback onOpenFilterSheet;
   const _TracksView(
       {required this.lib,
       required this.query,
       required this.sort,
-      required this.reverse});
+      required this.reverse,
+      required this.chipSort,
+      required this.onChipSortChanged,
+      required this.onOpenFilterSheet});
 
   @override
   State<_TracksView> createState() => _TracksViewState();
@@ -336,10 +409,26 @@ class _TracksViewState extends State<_TracksView>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Sort chips
+        SortChipBar(
+          currentSort: widget.chipSort,
+          onSortChanged: widget.onChipSortChanged,
+        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text('${tracks.length} tracks',
-              style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+          child: Row(
+            children: [
+              Text('${tracks.length} tracks',
+                  style: const TextStyle(color: PA.textMuted, fontSize: 12)),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Advanced filter',
+                icon: const Icon(Icons.filter_list, size: 18, color: PA.textSecondary),
+                visualDensity: VisualDensity.compact,
+                onPressed: widget.onOpenFilterSheet,
+              ),
+            ],
+          ),
         ),
         Expanded(
           child: Stack(

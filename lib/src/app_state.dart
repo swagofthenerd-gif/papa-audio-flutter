@@ -15,6 +15,7 @@ import 'queues_store.dart';
 import 'selection.dart';
 import 'settings.dart';
 import 'waveform.dart';
+import '../services/backup_service.dart';
 
 /// Central app state: bridge connection, PC library, and the player. Kept small
 /// on purpose — screens read exactly what they need and rebuild narrowly.
@@ -104,6 +105,9 @@ class AppState extends ChangeNotifier {
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence(db);
     if (bridge.configured) await loadLibrary();
+
+    // Auto-backup once per day (fire-and-forget, never blocks UI)
+    BackupService().autoBackup();
   }
 
   Future<bool> connect(String url) async {

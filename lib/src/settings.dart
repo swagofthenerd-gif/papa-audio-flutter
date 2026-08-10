@@ -67,6 +67,94 @@ class SettingsService extends ChangeNotifier {
   bool showRemainingTime = false;
   bool showUpNext = true;
 
+  // Indexer
+  List<String> libraryFolders = ['/storage/emulated/0/Music'];
+  bool respectNomedia = true;
+  int minTrackDurationSec = 5;
+  int minTrackSizeKB = 100;
+  bool useMediaStore = true;
+  bool refreshOnStartup = false;
+  bool skipSymbolicLinks = true;
+  bool scanHiddenFolders = false;
+  bool preferEmbeddedArt = true;
+  int maxArtworkSizeKB = 500;
+  bool scanOnMounted = true;
+  int scanIntervalMinutes = 0;
+  int indexerConcurrency = 4;
+  List<String> albumIdentifiers = ['album', 'album_artist', 'disc_number'];
+  bool indexerLogging = false;
+
+  // Customization
+  String tileLayoutConfig = 'title,artist,duration';
+  bool showTrackNumbers = true;
+  double albumTileSize = 160.0;
+  bool forceSquareThumbnails = false;
+  bool staggeredAlbumGrid = false;
+  bool gradientTiles = true;
+  bool tiltingCards = false;
+  bool floatingArtworkEffect = false;
+  int waveformBars = 80;
+  double waveformHeight = 48.0;
+  bool showWaveform = true;
+  double fontScale = 1.0;
+  bool compactMode = false;
+  bool showAlbumDates = true;
+  String dateFormat = 'MMM d, yyyy';
+  bool hourFormat24 = false;
+  bool showDividerLines = true;
+  double lyricFontSize = 18.0;
+  bool showPlainLyricsByDefault = false;
+  String albumPageSortOrder = 'track_number';
+  String defaultLibraryTab = 'tracks';
+  bool expandedSearchbarAlways = false;
+
+  // Theme
+  int accentColorIndex = 0;
+  bool dynamicArtworkColors = true;
+  String animatingThumbnailIntensity = 'full';
+
+  // Playback extras
+  double countListenAfterPercent = 50.0;
+  String onVolumeZero = 'nothing';
+  String onAudioInterruption = 'pause';
+  bool previousButtonReplays = true;
+  bool infinityQueueNextPrev = false;
+  bool jumpToFirstAfterFinish = false;
+  int minDurationToResumeSec = 300;
+  bool collectionResume = true;
+  int resumeThresholdSeconds = 30;
+  bool keepAwake = false;
+  String killPolicy = 'after_notification_swipe';
+  int killAfterIdleMinutes = 30;
+  String notificationConfig = 'always';
+  bool perTrackAudioOverride = false;
+
+  // Extra UI
+  String fabAction = 'shuffle_all';
+  String vibrationType = 'haptic';
+  bool mediaWaveHaptic = false;
+  bool partyMode = false;
+  bool partyModeAnimatedGradient = true;
+  int edgeColorsSwitchInterval = 8;
+  String artworkTapAction = 'toggle_lyrics';
+  String artworkLongPressAction = 'track_info';
+  String trackPlayMode = 'selected';
+  String playlistAddPosition = 'end';
+  bool mixedQueueEnabled = true;
+  bool clipboardMonitoring = false;
+
+  // Backup & Advanced
+  bool backupEnabled = false;
+  int autoBackupIntervalDays = 7;
+  String backupLocation = '/storage/emulated/0/PapaAudio/backups';
+  int backupMaxCount = 5;
+  int imageCacheMaxMB = 100;
+  int waveformCacheMaxMB = 50;
+  bool performanceMode = false;
+  bool compressImages = false;
+  bool animationsEnabled = true;
+  bool debugLogging = false;
+
   // Multi-value tag splitting (Artists / Genres tabs). Conservative defaults —
   // '&' and '/' split legitimate names too often, so they're opt-in.
   List<String> artistSeparators = [';', ' feat. ', ' ft. ', ' featuring '];
@@ -114,6 +202,88 @@ class SettingsService extends ChangeNotifier {
     pauseOnDisconnect = p.getBool('s.pauseOnDisc') ?? true;
     showRemainingTime = p.getBool('s.showRemaining') ?? false;
     showUpNext = p.getBool('s.showUpNext') ?? true;
+    // Indexer
+    libraryFolders = p.getStringList('s.libFolders') ?? libraryFolders;
+    respectNomedia = p.getBool('s.nomedia') ?? true;
+    minTrackDurationSec = p.getInt('s.minDur') ?? 5;
+    minTrackSizeKB = p.getInt('s.minSize') ?? 100;
+    useMediaStore = p.getBool('s.useMediaStore') ?? true;
+    refreshOnStartup = p.getBool('s.refreshStartup') ?? false;
+    skipSymbolicLinks = p.getBool('s.skipSymlinks') ?? true;
+    scanHiddenFolders = p.getBool('s.scanHidden') ?? false;
+    preferEmbeddedArt = p.getBool('s.prefEmbedArt') ?? true;
+    maxArtworkSizeKB = p.getInt('s.maxArtKB') ?? 500;
+    scanOnMounted = p.getBool('s.scanOnMount') ?? true;
+    scanIntervalMinutes = p.getInt('s.scanInterval') ?? 0;
+    indexerConcurrency = p.getInt('s.idxConcurrency') ?? 4;
+    albumIdentifiers = p.getStringList('s.albumIds') ?? albumIdentifiers;
+    indexerLogging = p.getBool('s.idxLog') ?? false;
+    // Customization
+    tileLayoutConfig = p.getString('s.tileLayout') ?? tileLayoutConfig;
+    showTrackNumbers = p.getBool('s.showTrackNums') ?? true;
+    albumTileSize = p.getDouble('s.albumTileSize') ?? 160.0;
+    forceSquareThumbnails = p.getBool('s.forceSquare') ?? false;
+    staggeredAlbumGrid = p.getBool('s.staggered') ?? false;
+    gradientTiles = p.getBool('s.gradientTiles') ?? true;
+    tiltingCards = p.getBool('s.tiltCards') ?? false;
+    floatingArtworkEffect = p.getBool('s.floatArt') ?? false;
+    waveformBars = p.getInt('s.waveBars') ?? 80;
+    waveformHeight = p.getDouble('s.waveH') ?? 48.0;
+    showWaveform = p.getBool('s.showWave') ?? true;
+    fontScale = p.getDouble('s.fontScale') ?? 1.0;
+    compactMode = p.getBool('s.compact') ?? false;
+    showAlbumDates = p.getBool('s.showAlbumDates') ?? true;
+    dateFormat = p.getString('s.dateFmt') ?? dateFormat;
+    hourFormat24 = p.getBool('s.hour24') ?? false;
+    showDividerLines = p.getBool('s.showDividers') ?? true;
+    lyricFontSize = p.getDouble('s.lyricFont') ?? 18.0;
+    showPlainLyricsByDefault = p.getBool('s.plainLyrics') ?? false;
+    albumPageSortOrder = p.getString('s.albumSort') ?? albumPageSortOrder;
+    defaultLibraryTab = p.getString('s.defaultLibTab') ?? defaultLibraryTab;
+    expandedSearchbarAlways = p.getBool('s.expandSearch') ?? false;
+    // Theme
+    accentColorIndex = p.getInt('s.accentIdx') ?? 0;
+    dynamicArtworkColors = p.getBool('s.dynamicColors') ?? true;
+    animatingThumbnailIntensity = p.getString('s.thumbIntensity') ?? 'full';
+    // Playback extras
+    countListenAfterPercent = p.getDouble('s.listenPct') ?? 50.0;
+    onVolumeZero = p.getString('s.onVol0') ?? 'nothing';
+    onAudioInterruption = p.getString('s.onInterrupt') ?? 'pause';
+    previousButtonReplays = p.getBool('s.prevReplays') ?? true;
+    infinityQueueNextPrev = p.getBool('s.infQueue') ?? false;
+    jumpToFirstAfterFinish = p.getBool('s.jumpFirst') ?? false;
+    minDurationToResumeSec = p.getInt('s.minResume') ?? 300;
+    collectionResume = p.getBool('s.collectionResume') ?? true;
+    resumeThresholdSeconds = p.getInt('s.resumeThresh') ?? 30;
+    keepAwake = p.getBool('s.keepAwake') ?? false;
+    killPolicy = p.getString('s.killPolicy') ?? 'after_notification_swipe';
+    killAfterIdleMinutes = p.getInt('s.killIdle') ?? 30;
+    notificationConfig = p.getString('s.notifConfig') ?? 'always';
+    perTrackAudioOverride = p.getBool('s.perTrackOverride') ?? false;
+    // Extra UI
+    fabAction = p.getString('s.fabAction') ?? 'shuffle_all';
+    vibrationType = p.getString('s.vibType') ?? 'haptic';
+    mediaWaveHaptic = p.getBool('s.mediaWaveHaptic') ?? false;
+    partyMode = p.getBool('s.partyMode') ?? false;
+    partyModeAnimatedGradient = p.getBool('s.partyGrad') ?? true;
+    edgeColorsSwitchInterval = p.getInt('s.edgeInterval') ?? 8;
+    artworkTapAction = p.getString('s.artTap') ?? 'toggle_lyrics';
+    artworkLongPressAction = p.getString('s.artLongPress') ?? 'track_info';
+    trackPlayMode = p.getString('s.trackPlayMode') ?? 'selected';
+    playlistAddPosition = p.getString('s.plAddPos') ?? 'end';
+    mixedQueueEnabled = p.getBool('s.mixedQueue') ?? true;
+    clipboardMonitoring = p.getBool('s.clipMon') ?? false;
+    // Backup & Advanced
+    backupEnabled = p.getBool('s.backupEnabled') ?? false;
+    autoBackupIntervalDays = p.getInt('s.backupInterval') ?? 7;
+    backupLocation = p.getString('s.backupLoc') ?? backupLocation;
+    backupMaxCount = p.getInt('s.backupMax') ?? 5;
+    imageCacheMaxMB = p.getInt('s.imgCacheMB') ?? 100;
+    waveformCacheMaxMB = p.getInt('s.waveCacheMB') ?? 50;
+    performanceMode = p.getBool('s.perfMode') ?? false;
+    compressImages = p.getBool('s.compressImgs') ?? false;
+    animationsEnabled = p.getBool('s.anims') ?? true;
+    debugLogging = p.getBool('s.debugLog') ?? false;
     notifyListeners();
   }
 
@@ -155,6 +325,88 @@ class SettingsService extends ChangeNotifier {
     p.setBool('s.pauseOnDisc', pauseOnDisconnect);
     p.setBool('s.showRemaining', showRemainingTime);
     p.setBool('s.showUpNext', showUpNext);
+    // Indexer
+    p.setStringList('s.libFolders', libraryFolders);
+    p.setBool('s.nomedia', respectNomedia);
+    p.setInt('s.minDur', minTrackDurationSec);
+    p.setInt('s.minSize', minTrackSizeKB);
+    p.setBool('s.useMediaStore', useMediaStore);
+    p.setBool('s.refreshStartup', refreshOnStartup);
+    p.setBool('s.skipSymlinks', skipSymbolicLinks);
+    p.setBool('s.scanHidden', scanHiddenFolders);
+    p.setBool('s.prefEmbedArt', preferEmbeddedArt);
+    p.setInt('s.maxArtKB', maxArtworkSizeKB);
+    p.setBool('s.scanOnMount', scanOnMounted);
+    p.setInt('s.scanInterval', scanIntervalMinutes);
+    p.setInt('s.idxConcurrency', indexerConcurrency);
+    p.setStringList('s.albumIds', albumIdentifiers);
+    p.setBool('s.idxLog', indexerLogging);
+    // Customization
+    p.setString('s.tileLayout', tileLayoutConfig);
+    p.setBool('s.showTrackNums', showTrackNumbers);
+    p.setDouble('s.albumTileSize', albumTileSize);
+    p.setBool('s.forceSquare', forceSquareThumbnails);
+    p.setBool('s.staggered', staggeredAlbumGrid);
+    p.setBool('s.gradientTiles', gradientTiles);
+    p.setBool('s.tiltCards', tiltingCards);
+    p.setBool('s.floatArt', floatingArtworkEffect);
+    p.setInt('s.waveBars', waveformBars);
+    p.setDouble('s.waveH', waveformHeight);
+    p.setBool('s.showWave', showWaveform);
+    p.setDouble('s.fontScale', fontScale);
+    p.setBool('s.compact', compactMode);
+    p.setBool('s.showAlbumDates', showAlbumDates);
+    p.setString('s.dateFmt', dateFormat);
+    p.setBool('s.hour24', hourFormat24);
+    p.setBool('s.showDividers', showDividerLines);
+    p.setDouble('s.lyricFont', lyricFontSize);
+    p.setBool('s.plainLyrics', showPlainLyricsByDefault);
+    p.setString('s.albumSort', albumPageSortOrder);
+    p.setString('s.defaultLibTab', defaultLibraryTab);
+    p.setBool('s.expandSearch', expandedSearchbarAlways);
+    // Theme
+    p.setInt('s.accentIdx', accentColorIndex);
+    p.setBool('s.dynamicColors', dynamicArtworkColors);
+    p.setString('s.thumbIntensity', animatingThumbnailIntensity);
+    // Playback extras
+    p.setDouble('s.listenPct', countListenAfterPercent);
+    p.setString('s.onVol0', onVolumeZero);
+    p.setString('s.onInterrupt', onAudioInterruption);
+    p.setBool('s.prevReplays', previousButtonReplays);
+    p.setBool('s.infQueue', infinityQueueNextPrev);
+    p.setBool('s.jumpFirst', jumpToFirstAfterFinish);
+    p.setInt('s.minResume', minDurationToResumeSec);
+    p.setBool('s.collectionResume', collectionResume);
+    p.setInt('s.resumeThresh', resumeThresholdSeconds);
+    p.setBool('s.keepAwake', keepAwake);
+    p.setString('s.killPolicy', killPolicy);
+    p.setInt('s.killIdle', killAfterIdleMinutes);
+    p.setString('s.notifConfig', notificationConfig);
+    p.setBool('s.perTrackOverride', perTrackAudioOverride);
+    // Extra UI
+    p.setString('s.fabAction', fabAction);
+    p.setString('s.vibType', vibrationType);
+    p.setBool('s.mediaWaveHaptic', mediaWaveHaptic);
+    p.setBool('s.partyMode', partyMode);
+    p.setBool('s.partyGrad', partyModeAnimatedGradient);
+    p.setInt('s.edgeInterval', edgeColorsSwitchInterval);
+    p.setString('s.artTap', artworkTapAction);
+    p.setString('s.artLongPress', artworkLongPressAction);
+    p.setString('s.trackPlayMode', trackPlayMode);
+    p.setString('s.plAddPos', playlistAddPosition);
+    p.setBool('s.mixedQueue', mixedQueueEnabled);
+    p.setBool('s.clipMon', clipboardMonitoring);
+    // Backup & Advanced
+    p.setBool('s.backupEnabled', backupEnabled);
+    p.setInt('s.backupInterval', autoBackupIntervalDays);
+    p.setString('s.backupLoc', backupLocation);
+    p.setInt('s.backupMax', backupMaxCount);
+    p.setInt('s.imgCacheMB', imageCacheMaxMB);
+    p.setInt('s.waveCacheMB', waveformCacheMaxMB);
+    p.setBool('s.perfMode', performanceMode);
+    p.setBool('s.compressImgs', compressImages);
+    p.setBool('s.anims', animationsEnabled);
+    p.setBool('s.debugLog', debugLogging);
   }
 }
 

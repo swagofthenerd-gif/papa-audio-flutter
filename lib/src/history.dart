@@ -221,6 +221,20 @@ class HistoryService extends ChangeNotifier {
     return out;
   }
 
+  /// Remove all history entries for a single track.
+  Future<void> clearTrackHistory(Track t) async {
+    entries.removeWhere((e) => e.track.key == t.key);
+    counts.remove(t.key);
+    firstListen.remove(t.key);
+    lastListen.remove(t.key);
+    _byKey.remove(t.key);
+    try {
+      await _db?.db.delete('history', where: 'track_key = ?', whereArgs: [t.key]);
+    } catch (_) {}
+    revision++;
+    notifyListeners();
+  }
+
   /// Writes are incremental now; kept for the app-lifecycle hook's benefit.
   Future<void> flush() async {}
 }

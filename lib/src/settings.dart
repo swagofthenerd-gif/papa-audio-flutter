@@ -50,6 +50,23 @@ class SettingsService extends ChangeNotifier {
   /// instead of staying stopped at the end.
   bool queueEndRestart = false;
 
+  // Last.fm
+  String? lastFmApiKey = '3a74e7f5a3b0d7c4e9f6a8b2c1d0e5f7';
+  String? lastFmSecret = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
+  String? lastFmSessionKey;
+  String? lastFmUsername;
+
+  // OLED / theme
+  bool oledTheme = false;
+
+  // Headphone actions
+  bool resumeOnConnect = true;
+  bool pauseOnDisconnect = true;
+
+  // Player extras
+  bool showRemainingTime = false;
+  bool showUpNext = true;
+
   // Multi-value tag splitting (Artists / Genres tabs). Conservative defaults —
   // '&' and '/' split legitimate names too often, so they're opt-in.
   List<String> artistSeparators = [';', ' feat. ', ' ft. ', ' featuring '];
@@ -90,6 +107,13 @@ class SettingsService extends ChangeNotifier {
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
     genreSeparators = p.getStringList('s.genreSeps') ?? genreSeparators;
     splitBlacklist = p.getStringList('s.splitBlacklist') ?? splitBlacklist;
+    lastFmSessionKey = p.getString('s.lastFmKey');
+    lastFmUsername = p.getString('s.lastFmUser');
+    oledTheme = p.getBool('s.oled') ?? false;
+    resumeOnConnect = p.getBool('s.resumeOnConn') ?? true;
+    pauseOnDisconnect = p.getBool('s.pauseOnDisc') ?? true;
+    showRemainingTime = p.getBool('s.showRemaining') ?? false;
+    showUpNext = p.getBool('s.showUpNext') ?? true;
     notifyListeners();
   }
 
@@ -124,6 +148,13 @@ class SettingsService extends ChangeNotifier {
     p.setStringList('s.artistSeps', artistSeparators);
     p.setStringList('s.genreSeps', genreSeparators);
     p.setStringList('s.splitBlacklist', splitBlacklist);
+    if (lastFmSessionKey != null) p.setString('s.lastFmKey', lastFmSessionKey!);
+    if (lastFmUsername != null) p.setString('s.lastFmUser', lastFmUsername!);
+    p.setBool('s.oled', oledTheme);
+    p.setBool('s.resumeOnConn', resumeOnConnect);
+    p.setBool('s.pauseOnDisc', pauseOnDisconnect);
+    p.setBool('s.showRemaining', showRemainingTime);
+    p.setBool('s.showUpNext', showUpNext);
   }
 }
 

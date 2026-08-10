@@ -5,7 +5,9 @@ import 'art_color.dart';
 import 'bridge.dart';
 import 'db.dart';
 import 'downloads.dart';
+import 'headphone_service.dart';
 import 'history.dart';
+import 'lastfm.dart';
 import 'lyrics.dart';
 import 'local_library.dart';
 import 'models.dart';
@@ -14,6 +16,7 @@ import 'playlists.dart';
 import 'queues_store.dart';
 import 'selection.dart';
 import 'settings.dart';
+import 'volume_brightness.dart';
 import 'waveform.dart';
 import '../services/backup_service.dart';
 
@@ -33,6 +36,10 @@ class AppState extends ChangeNotifier {
   final TrackSelection selection = TrackSelection();
   late final ArtColorService artColors =
       ArtColorService(bridgeArtUrl: (p) => bridge.artUrl(p, width: 96));
+  late final LastFmService lastFm = LastFmService(settings);
+  final VolumeBrightnessController volumeBrightness =
+      VolumeBrightnessController();
+  HeadphoneService? headphones;
   LyricsService? lyrics; // created once the DB is open
   WaveformService? waveforms;
 
@@ -66,6 +73,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> restore() async {
     playerService.history = history;
+    playerService.lastFm = lastFm;
     _lifecycle ??= AppLifecycleListener(onInactive: () => history.flush());
 
     // `ready` flips FIRST — the shell must appear within a frame of launch,
@@ -104,6 +112,10 @@ class AppState extends ChangeNotifier {
     playerService.onNewQueue = queues.record;
     // Bring back last session's queue (paused) once sources are known.
     await playerService.initPersistence(db);
+    // Last.fm session restore + headphones
+    lastFm.restoreSession();
+    headphones = HeadphoneService(this)..start();
+    volumeBrightness.fetchCurrentLevels();
     if (bridge.configured) await loadLibrary();
 
     // Auto-backup once per day (fire-and-forget, never blocks UI)

@@ -9,6 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'bridge.dart';
 import 'db.dart';
 import 'history.dart';
+import 'lastfm.dart';
 import 'local_library.dart';
 import 'models.dart';
 import 'settings.dart';
@@ -32,6 +33,7 @@ class PlayerService {
 
   HistoryService? history;
   SettingsService? settings;
+  LastFmService? lastFm;
 
   /// Notified whenever a brand-new queue starts (for the saved-queues archive).
   void Function(List<Track>)? onNewQueue;
@@ -64,6 +66,8 @@ class PlayerService {
     // transition fades are on, each new track opens with a short fade-in.
     _player.currentIndexStream.listen((_) {
       _lastInsert = null;
+      final t = currentTrack;
+      if (t != null) lastFm?.nowPlaying(t);
       final fadeSec = settings?.transitionFadeSec ?? 0;
       if (fadeSec > 0 && _player.playing) {
         final seq = ++_rampSeq;

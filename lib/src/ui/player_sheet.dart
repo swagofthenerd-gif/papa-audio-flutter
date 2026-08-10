@@ -10,6 +10,7 @@ import '../lyrics.dart';
 import '../models.dart';
 import '../player_service.dart';
 import '../theme.dart';
+import '../volume_brightness.dart';
 import '../waveform.dart';
 import 'dialogs.dart';
 import 'equalizer_screen.dart';
@@ -87,7 +88,8 @@ class _PlayerSheetState extends State<PlayerSheet>
 
   @override
   Widget build(BuildContext context) {
-    final ps = context.read<AppState>().playerService;
+    final app = context.read<AppState>();
+    final ps = app.playerService;
     return StreamBuilder<int?>(
       stream: ps.currentIndex,
       builder: (context, _) {
@@ -236,6 +238,8 @@ class _PlayerSheetState extends State<PlayerSheet>
                     ),
                     ),
                   ),
+                  // Volume / brightness swipe overlay
+                  VolumeBrightnessOverlay(controller: app.volumeBrightness),
                 ],
               );
             },
@@ -453,6 +457,36 @@ class _FullPlayer extends StatelessWidget {
           ),
           const Spacer(),
           SeekBar(ps: ps, track: track),
+          // Up-next: show the next track in queue when available
+          StreamBuilder<int?>(
+            stream: ps.currentIndex,
+            builder: (_, idxSnap) {
+              final s = context.read<AppState>().settings;
+              if (!s.showUpNext) return const SizedBox.shrink();
+              final i = (idxSnap.data ?? -1) + 1;
+              if (i < 0 || i >= ps.queue.length) return const SizedBox.shrink();
+              final next = ps.queue[i];
+              return Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    const Icon(Icons.skip_next, size: 14, color: PA.textMuted),
+                    const SizedBox(width: 6),
+                    Text('Next: ',
+                        style: const TextStyle(
+                            fontSize: 11, color: PA.textMuted)),
+                    Expanded(
+                      child: Text('${next.title} · ${next.artist}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 11, color: PA.textSecondary)),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           TransportControls(ps: ps),
           const SizedBox(height: 6),
           // Namida-style utility row: sleep, speed, queue.
@@ -731,7 +765,10 @@ class _SeekBarState extends State<SeekBar> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(fmtDuration(value / 1000),
+                        Text(
+                            context.read<AppState>().settings.showRemainingTime
+                                ? '-${fmtDuration((total - pos) / 1000)}'
+                                : fmtDuration(value / 1000),
                             style: const TextStyle(
                                 fontSize: 11, color: PA.textMuted)),
                         Text(fmtDuration(total / 1000),

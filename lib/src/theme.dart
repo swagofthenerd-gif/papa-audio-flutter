@@ -51,15 +51,17 @@ class PA {
   static const warning = Color(0xFFF59B23);
 }
 
-ThemeData papaTheme() {
+ThemeData papaTheme({bool oled = false}) {
+  final bg = oled ? const Color(0xFF000000) : PA.background;
+  final surf = oled ? const Color(0xFF0A0A0A) : PA.surface;
   return ThemeData(
     brightness: Brightness.dark,
-    scaffoldBackgroundColor: PA.background,
+    scaffoldBackgroundColor: bg,
     colorSchemeSeed: PA.accent,
     useMaterial3: true,
     fontFamily: 'Roboto',
-    appBarTheme: const AppBarTheme(
-      backgroundColor: PA.background,
+    appBarTheme: AppBarTheme(
+      backgroundColor: bg,
       elevation: 0,
       scrolledUnderElevation: 0,
     ),
@@ -74,12 +76,12 @@ ThemeData papaTheme() {
       labelLarge: PapaText.button,
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: PA.surface,
+      backgroundColor: surf,
       indicatorColor: PA.accent.withValues(alpha: 0.2),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: PA.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: surf,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: PA.surfaceElevated,

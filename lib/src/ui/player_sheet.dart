@@ -409,6 +409,17 @@ class _FullPlayer extends StatelessWidget {
               if (v < -300) ps.next();
               if (v > 300) ps.previousSmart();
             },
+            onVerticalDragStart: (_) =>
+                context.read<AppState>().volumeBrightness.onDragStart(),
+            onVerticalDragUpdate: (d) {
+              final screenH = MediaQuery.sizeOf(context).height;
+              context
+                  .read<AppState>()
+                  .volumeBrightness
+                  .onDragUpdate(d.delta.dy / screenH);
+            },
+            onVerticalDragEnd: (_) =>
+                context.read<AppState>().volumeBrightness.onDragEnd(),
             child: ValueListenableBuilder<bool>(
               valueListenable: lyricsOn,
               builder: (_, lyr, _) => SizedBox(

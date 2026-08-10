@@ -48,11 +48,17 @@ class PapaApp extends StatelessWidget {
   const PapaApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Papa Audio',
-      debugShowCheckedModeBanner: false,
-      theme: papaTheme(),
-      home: const Root(),
+    return AnimatedBuilder(
+      animation: context.read<AppState>().settings,
+      builder: (_, _) {
+        final oled = context.read<AppState>().settings.oledTheme;
+        return MaterialApp(
+          title: 'Papa Audio',
+          debugShowCheckedModeBanner: false,
+          theme: papaTheme(oled: oled),
+          home: const Root(),
+        );
+      },
     );
   }
 }

@@ -19,9 +19,6 @@ class SettingsService extends ChangeNotifier {
   /// background-audio plugin forbids — this is the single-player version.)
   int transitionFadeSec = 0;
 
-  /// Tint the expanded player with the current artwork's dominant color.
-  bool dynamicColors = true;
-
   // Listen counting: fixed seconds, or a percentage of the track's duration.
   int listenSeconds = 20;
   bool listenPercentMode = false;
@@ -191,7 +188,6 @@ class SettingsService extends ChangeNotifier {
     holdSeekSec = (p.getInt('s.holdSeekSec') ?? 5).clamp(1, 60);
     artistBeforeTitle = p.getBool('s.artistBeforeTitle') ?? false;
     transitionFadeSec = p.getInt('s.transitionFadeSec') ?? 0;
-    dynamicColors = p.getBool('s.dynamicColors') ?? true;
     artistSeparators = p.getStringList('s.artistSeps') ?? artistSeparators;
     genreSeparators = p.getStringList('s.genreSeps') ?? genreSeparators;
     splitBlacklist = p.getStringList('s.splitBlacklist') ?? splitBlacklist;
@@ -243,7 +239,7 @@ class SettingsService extends ChangeNotifier {
     expandedSearchbarAlways = p.getBool('s.expandSearch') ?? false;
     // Theme
     accentColorIndex = p.getInt('s.accentIdx') ?? 0;
-    dynamicArtworkColors = p.getBool('s.dynamicColors') ?? true;
+    dynamicArtworkColors = p.getBool('s.dynamicArtColors') ?? true;
     animatingThumbnailIntensity = p.getString('s.thumbIntensity') ?? 'full';
     // Playback extras
     countListenAfterPercent = p.getDouble('s.listenPct') ?? 50.0;
@@ -314,7 +310,6 @@ class SettingsService extends ChangeNotifier {
     p.setInt('s.holdSeekSec', holdSeekSec);
     p.setBool('s.artistBeforeTitle', artistBeforeTitle);
     p.setInt('s.transitionFadeSec', transitionFadeSec);
-    p.setBool('s.dynamicColors', dynamicColors);
     p.setStringList('s.artistSeps', artistSeparators);
     p.setStringList('s.genreSeps', genreSeparators);
     p.setStringList('s.splitBlacklist', splitBlacklist);
@@ -366,7 +361,7 @@ class SettingsService extends ChangeNotifier {
     p.setBool('s.expandSearch', expandedSearchbarAlways);
     // Theme
     p.setInt('s.accentIdx', accentColorIndex);
-    p.setBool('s.dynamicColors', dynamicArtworkColors);
+    p.setBool('s.dynamicArtColors', dynamicArtworkColors);
     p.setString('s.thumbIntensity', animatingThumbnailIntensity);
     // Playback extras
     p.setDouble('s.listenPct', countListenAfterPercent);

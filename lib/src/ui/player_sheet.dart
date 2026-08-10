@@ -60,7 +60,7 @@ class _PlayerSheetState extends State<PlayerSheet>
     if (_artColorKey == track.key) return;
     _artColorKey = track.key;
     final s = context.read<AppState>();
-    if (!s.settings.dynamicColors) {
+    if (!s.settings.dynamicArtworkColors) {
       _artColor = null;
       return;
     }
